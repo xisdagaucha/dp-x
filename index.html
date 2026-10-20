@@ -96,7 +96,7 @@ textarea.input{min-height:80px;resize:vertical}
 a.btn{color:var(--ink);text-decoration:none}
 </style></head>
 <body><div id="app"></div><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script><script src="config.js"></script><script>/* DP X · Departamento pessoal do Xis da Gaúcha — núcleo */
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -149,7 +149,7 @@ function quintoDiaUtil(y, m) {
 }
 
 /* ======================= DADOS ======================= */
-const COLS = ['funcionarios', 'eventos', 'docs', 'pecas', 'entregas', 'candidatos'];
+const COLS = ['funcionarios', 'eventos', 'docs', 'pecas', 'entregas', 'candidatos', 'ponto'];
 const DEFAULT_CFG = {
   lojas: [
     { id: 'barreiros', nome: 'Barreiros · São José', razao: 'XIS DA GAUCHA SC LTDA', cnpj: '43.631.016/0001-05', endereco: 'Rua São Ludgero, 1778 – Barreiros', cidade: 'São José/SC', clinica: 'Rua Conselheiro Mafra, 220, Florianópolis' },
@@ -257,6 +257,7 @@ const ICO = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
   plus: '<path d="M12 5v14M5 12h14"/>', print: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>',
   clip: '<path d="M20 11l-8.5 8.5a5 5 0 01-7-7L13 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L14 7"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
   back: '<path d="M15 5l-7 7 7 7"/>', out: '<path d="M10 4H4v16h6M16 8l4 4-4 4M20 12H9"/>', refresh: '<path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7"/>',
   check: '<path d="M4 12l5 5L20 6"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>', wa: '<path d="M4 20l1.3-4A8 8 0 1 1 8 18.7z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1-1.5-2-1-1 1c-1-.5-1.5-1-2-2l1-1-1-2z"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.5 4.2-7 8-7s7 2.5 8 7"/>'
@@ -688,9 +689,187 @@ function editarQuadro() {
   $('#qd-ok', m.el).onclick = async () => { ler(); await Store.setCfg({ quadro: rows.filter(r => r.cargo && r.qtd > 0) }); m.close(); toast('Quadro salvo'); };
 }
 
+/* ======================= PONTO DO MÊS ======================= */
+/* lançamento mensal: horas extras, horas faltantes (atrasos/saídas), faltas com e sem atestado */
+const hm = v => { /* aceita "2:30", "2,5", "2h30" → horas decimais */
+  const s = String(v == null ? '' : v).trim().toLowerCase().replace('h', ':').replace(/\s/g, ''); if (!s) return 0;
+  if (s.includes(':')) { const [h, m] = s.split(':'); return (+h || 0) + (+m || 0) / 60; }
+  return num(s);
+};
+const fmtH = h => { h = +h || 0; if (!h) return '0:00'; const neg = h < 0; h = Math.abs(h); let H = Math.floor(h), M = Math.round((h - H) * 60); if (M === 60) { H++; M = 0; } return (neg ? '-' : '') + H + ':' + pad2(M); };
+const Ponto = {
+  id(funcId, mes) { return `${funcId}_${mes}`; },
+  get(funcId, mes) { return Store.get('ponto', this.id(funcId, mes)); },
+  doMes(mes) { return Store.all('ponto').filter(p => p.mes === mes); },
+  daPessoa(funcId) { return Store.all('ponto').filter(p => p.funcId === funcId).sort((a, b) => b.mes.localeCompare(a.mes)); },
+  mesTxt(mes) { const [y, m] = mes.split('-'); return `${MESES[+m - 1]} de ${y}`; },
+  limpo(p) { return !p || (!(+p.faltantes) && !(+p.faltasInj) && !(+p.faltasJust)); },
+  /* quem tem direito ao voucher: sem atraso e sem falta no mês */
+  voucher(p) { if (!p || !p.lancado) return null; return !(+p.faltantes) && !(+p.faltasInj); }
+};
+
+function vPonto(pg) {
+  const mes = S.pontoMes || D.add(D.hoje().slice(0, 7) + '-01', -1).slice(0, 7);
+  const at = Func.ativos().filter(f => !S.loja || f.loja === S.loja), pts = Ponto.doMes(mes);
+  const tot = pts.reduce((a, p) => ({ ex: a.ex + (+p.extras || 0), fa: a.fa + (+p.faltantes || 0), fi: a.fi + (+p.faltasInj || 0), fj: a.fj + (+p.faltasJust || 0), v: a.v + num(p.extrasValor) }), { ex: 0, fa: 0, fi: 0, fj: 0, v: 0 });
+  const direito = at.filter(f => Ponto.voucher(Ponto.get(f.id, mes)) === true);
+  const mesesOpt = []; for (let i = 0; i < 13; i++) { const m = D.addMeses(D.hoje().slice(0, 7) + '-01', -i).slice(0, 7); mesesOpt.push(m); }
+  pg.innerHTML = `<div class="head"><div class="grow"><h1>Ponto do mês</h1><div class="sub">Some o cartão de cada um e lance aqui. O funcionário vê o mês dele na Minha área.</div></div>
+      <select class="input" id="pt-mes" style="width:auto">${mesesOpt.map(m => `<option value="${m}" ${m === mes ? 'selected' : ''}>${Ponto.mesTxt(m)}</option>`).join('')}</select>
+      <label class="btn">${ico('clip')} Importar planilha<input type="file" id="pt-imp" accept=".csv,.txt,text/csv" hidden></label><button class="btn" id="pt-pr">${ico('print')} Resumo para o contador</button></div>
+    <div class="kpis"><div class="kpi"><span class="l">Horas extras</span><span class="v">${fmtH(tot.ex)}</span>${tot.v ? `<span class="muted small">${brl(tot.v)}</span>` : ''}</div><div class="kpi"><span class="l">Horas faltantes</span><span class="v">${fmtH(tot.fa)}</span><span class="muted small">atrasos e saídas antes</span></div><div class="kpi"><span class="l">Faltas</span><span class="v">${tot.fi + tot.fj}</span><span class="muted small">${tot.fi} sem justificativa · ${tot.fj} com atestado</span></div><div class="kpi"><span class="l">Direito ao voucher</span><span class="v">${direito.length}</span><span class="muted small">sem atraso e sem falta</span></div></div>
+    <div class="chips" style="margin-bottom:12px">${[['', 'Todas as lojas'], ...Lojas.list().map(l => [l.id, Lojas.curto(l.id)])].map(([k, t]) => `<button data-fl="${k}" class="${(S.loja || '') === k ? 'on' : ''}">${esc(t)}</button>`).join('')}</div>
+    <table class="table"><thead><tr><th>Funcionário</th><th style="width:110px">Horas extras</th><th style="width:120px">Valor extras (R$)</th><th style="width:120px">Horas faltantes</th><th style="width:90px">Faltas sem justif.</th><th style="width:90px">Faltas com atestado</th><th>Observação</th><th>Voucher</th></tr></thead><tbody>
+    ${at.map(f => { const p = Ponto.get(f.id, mes) || {}, v = Ponto.voucher(p); return `<tr data-pf="${f.id}"><td><b>${esc(f.nome)}</b><br><span class="muted small">${esc(f.cargo || '')} · ${esc(Lojas.curto(f.loja))}</span></td>
+      <td><input class="input num" data-pk="extras" value="${p.extras ? fmtH(p.extras) : ''}" placeholder="0:00"></td><td><input class="input num" data-pk="extrasValor" value="${p.extrasValor ? String(p.extrasValor).replace('.', ',') : ''}" placeholder="0,00" inputmode="decimal"></td>
+      <td><input class="input num" data-pk="faltantes" value="${p.faltantes ? fmtH(p.faltantes) : ''}" placeholder="0:00"></td><td><input class="input num" type="number" min="0" data-pk="faltasInj" value="${p.faltasInj || ''}" placeholder="0"></td><td><input class="input num" type="number" min="0" data-pk="faltasJust" value="${p.faltasJust || ''}" placeholder="0"></td>
+      <td><input class="input" data-pk="obs" value="${esc(p.obs || '')}" placeholder="Ex.: faltou dia 12, avisou"></td><td>${v === true ? '<span class="pill ok">tem direito</span>' : v === false ? '<span class="pill bad">não</span>' : '<span class="muted small">lançar</span>'}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">Nenhum funcionário ativo.</td></tr>'}
+    </tbody></table><p class="muted small">Horas no formato 2:30 (duas horas e meia). Salva sozinho ao sair de cada campo. A planilha do ponto digital pode ser importada no botão acima (colunas: nome ou CPF, extras, faltantes, faltas, atestado).</p>`;
+  $('#pt-mes', pg).onchange = e => { S.pontoMes = e.target.value; App.render(); };
+  $$('[data-fl]', pg).forEach(b => b.onclick = () => { S.loja = b.dataset.fl; App.render(); });
+  $$('[data-pk]', pg).forEach(i => i.onchange = async () => {
+    const tr = i.closest('[data-pf]'), funcId = tr.dataset.pf, cur = Ponto.get(funcId, mes) || { id: Ponto.id(funcId, mes), funcId, mes };
+    const k = i.dataset.pk, v = ['extras', 'faltantes'].includes(k) ? hm(i.value) : k === 'extrasValor' ? num(i.value) : ['faltasInj', 'faltasJust'].includes(k) ? Math.max(0, +i.value || 0) : i.value.trim();
+    await Store.put('ponto', Object.assign({}, cur, { [k]: v, lancado: true, by: Store.quem() }));
+  });
+  $('#pt-imp', pg).onchange = e => { const f = e.target.files[0]; if (f) importarPonto(f, mes); e.target.value = ''; };
+  $('#pt-pr', pg).onclick = () => imprimirPonto(mes);
+}
+/* importa CSV do ponto digital: reconhece as colunas pelo nome do cabeçalho */
+async function importarPonto(file, mes) {
+  const txt = await file.text(), sep = (txt.split('\n')[0].match(/;/g) || []).length >= (txt.split('\n')[0].match(/,/g) || []).length ? ';' : ',';
+  const linhas = txt.split(/\r?\n/).filter(l => l.trim()).map(l => l.split(sep).map(c => c.replace(/^"|"$/g, '').trim()));
+  if (linhas.length < 2) return toast('A planilha está vazia', 'bad');
+  const cab = linhas[0].map(norm), achar = (...ks) => cab.findIndex(c => ks.some(k => c.includes(k)));
+  const iNome = achar('nome', 'colaborador', 'funcionario'), iCpf = achar('cpf'), iEx = achar('extra'), iFa = achar('faltante', 'atraso', 'debito'), iFi = cab.findIndex(c => c.includes('falta') && !c.includes('faltante') && !c.includes('just') && !c.includes('atest')), iFj = achar('atestado', 'justific');
+  if (iNome < 0 && iCpf < 0) return toast('Não achei a coluna de nome ou CPF', 'bad');
+  const fs = Func.ativos(), ok = [], nao = [];
+  for (const l of linhas.slice(1)) {
+    const cpf = iCpf >= 0 ? l[iCpf].replace(/\D/g, '') : '', nome = iNome >= 0 ? l[iNome] : '';
+    const f = (cpf && fs.find(x => String(x.cpf || '').replace(/\D/g, '') === cpf)) || fs.find(x => norm(x.nome) === norm(nome));
+    if (!f) { nao.push(nome || cpf); continue; }
+    const cur = Ponto.get(f.id, mes) || { id: Ponto.id(f.id, mes), funcId: f.id, mes };
+    const p = Object.assign({}, cur, { lancado: true, by: Store.quem() + ' (planilha)' });
+    if (iEx >= 0) p.extras = hm(l[iEx]); if (iFa >= 0) p.faltantes = hm(l[iFa]); if (iFi >= 0) p.faltasInj = +l[iFi] || 0; if (iFj >= 0) p.faltasJust = +l[iFj] || 0;
+    await Store.put('ponto', p); ok.push(f.nome);
+  }
+  modal({ title: 'Planilha importada', body: `<p style="margin:0"><b>${ok.length}</b> ${ok.length === 1 ? 'funcionário atualizado' : 'funcionários atualizados'} em ${Ponto.mesTxt(mes)}.</p>${nao.length ? `<div class="alert"><div><b>Não encontrei na lista de ativos:</b><br>${nao.map(esc).join('<br>')}<br><span class="small">Confira se o nome está igual ao da ficha, ou coloque o CPF na planilha.</span></div></div>` : ''}`, foot: '<button class="btn primary" data-x>Ok</button>' });
+}
+function imprimirPonto(mes) {
+  const fs = Func.ativos(), linhas = fs.map(f => ({ f, p: Ponto.get(f.id, mes) || {} }));
+  const por = {}; linhas.forEach(x => (por[x.f.loja] = por[x.f.loja] || []).push(x));
+  const pags = Object.entries(por).map(([loja, l]) => `<div class="pg">${cab(loja)}<h1>Resumo do ponto · ${Ponto.mesTxt(mes)}</h1>
+    <table><thead><tr><th>Funcionário</th><th>Cargo</th><th>Horas extras</th><th>Valor extras</th><th>Horas faltantes</th><th>Faltas sem justif.</th><th>Faltas c/ atestado</th><th>Observação</th></tr></thead><tbody>
+    ${l.map(({ f, p }) => `<tr><td>${esc(f.nome)}</td><td>${esc(f.cargo || '')}</td><td>${fmtH(p.extras)}</td><td>${p.extrasValor ? brl(p.extrasValor) : '–'}</td><td>${fmtH(p.faltantes)}</td><td>${p.faltasInj || 0}</td><td>${p.faltasJust || 0}</td><td>${esc(p.obs || '')}</td></tr>`).join('')}</tbody></table>
+    <p style="font-size:11px;color:#555">Gerado pelo DP X em ${fmtDT(Date.now())}.</p></div>`);
+  imprimir('Resumo do ponto ' + Ponto.mesTxt(mes), pags);
+}
+
+/* ======================= LIGAÇÃO COM O PEDIDO X E MINHA ÁREA ======================= */
+const PEDIDOX_CONFIG = { apiKey: 'AIzaSyBKGDZLO3hwAHGbUY4IIxeY0o_AQNzjo9Q', authDomain: 'pedido-x-9421f.firebaseapp.com', projectId: 'pedido-x-9421f', storageBucket: 'pedido-x-9421f.firebasestorage.app', messagingSenderId: '161578704022', appId: '1:161578704022:web:86b8c5ae97cfef6e27f6b7' };
+const FUNC_DOMINIO = 'funcionarios.xisdagaucha.com.br';
+const PX = {
+  app: null, user: null, ultimo: 0, erro: '', rodando: false, dados: null,
+  ligado() { return !!this.user; },
+  async init() {
+    if (Store.mode === 'demo' || typeof firebase === 'undefined') return;
+    try { this.app = firebase.apps.find(a => a.name === 'pedidox') || firebase.initializeApp(PEDIDOX_CONFIG, 'pedidox'); } catch (e) { this.erro = e.message; return; }
+    await new Promise(res => this.app.auth().onAuthStateChanged(u => { this.user = u && !u.isAnonymous ? u : null; res(); }));
+    if (this.user) { this.sync(); setInterval(() => this.sync(), 10 * 60000); }
+  },
+  async entrar(email, senha) { await this.app.auth().signInWithEmailAndPassword(email, senha); this.user = this.app.auth().currentUser; await this.sync(); },
+  async sair() { if (this.app) await this.app.auth().signOut(); this.user = null; App.render(); },
+  k(n) { return norm(n); },
+  /* lê do Pedido X o consumo dos últimos 2 meses e os vouchers */
+  async ler() {
+    const db = this.app.firestore(), ini = new Date(); ini.setDate(1); ini.setMonth(ini.getMonth() - 1); ini.setHours(0, 0, 0, 0);
+    const [eq, vo, pe] = await Promise.all([db.collection('equipe').where('at', '>=', ini.getTime()).get(), db.collection('vouchers').get(), db.collection('pessoas').get()]);
+    const m = s => s.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    return { equipe: m(eq), vouchers: m(vo), pessoas: m(pe) };
+  },
+  /* desligado no DP X → inativo no Pedido X (some do caixa); ativo novo → cadastrado no Pedido X */
+  async pessoasPedidoX(pessoas) {
+    const db = this.app.firestore(); let n = 0;
+    for (const f of Store.all('funcionarios')) {
+      const nome = f.nomePedidoX || f.nome, p = pessoas.find(x => this.k(x.nome) === this.k(nome)), inativo = f.status === 'desligado';
+      if (p && !!p.inativo !== inativo) { await db.collection('pessoas').doc(p.id).set({ inativo }, { merge: true }); n++; }
+      if (!p && !inativo) { await db.collection('pessoas').add({ nome, tipo: /entreg/i.test(f.cargo || '') ? 'entregador' : 'funcionario', loja: f.loja, limite: 0, origem: 'DP X' }); n++; }
+    }
+    return n;
+  },
+  async sync(manual) {
+    if (!this.ligado() || this.rodando) return; this.rodando = true; this.erro = '';
+    try {
+      const d = await this.ler(); this.dados = d;
+      await this.pessoasPedidoX(d.pessoas);
+      await Portal.publicarTodos(d);
+      this.ultimo = Date.now(); if (manual) toast('Pedido X e Minha área atualizados');
+    } catch (e) { this.erro = e.code || e.message; if (manual) toast('Não consegui ligar ao Pedido X: ' + this.erro, 'bad'); }
+    this.rodando = false; App.render(true);
+  },
+  ligar() {
+    const m = modal({ title: 'Ligar ao Pedido X', body: `<p style="margin:0">Entre uma vez com o <b>e-mail e senha da gestão do Pedido X</b>. O DP X passa a buscar o consumo e o voucher de cada funcionário para a Minha área, e quem for desligado aqui some do caixa.</p>${F('E-mail do Pedido X', 'email', '', { type: 'email', attrs: 'autocapitalize="off"' })}${F('Senha', 'senha', '', { type: 'password' })}<p class="small" id="lx-err" style="color:var(--bad);margin:0"></p>`, foot: '<button class="btn" data-x>Cancelar</button><button class="btn primary" id="lx-ok">Ligar</button>' });
+    $('#lx-ok', m.el).onclick = async () => { const d = lerForm(m.el); $('#lx-ok', m.el).disabled = true; try { await this.entrar(d.email, d.senha); m.close(); toast('Ligado ao Pedido X'); } catch (e) { $('#lx-ok', m.el).disabled = false; $('#lx-err', m.el).textContent = /credential|password|user/i.test(e.code || '') ? 'E-mail ou senha incorretos.' : 'Erro: ' + (e.code || e.message); } };
+  }
+};
+
+const Portal = {
+  email(f) { return String(f.cpf || '').replace(/\D/g, '') + '@' + FUNC_DOMINIO; },
+  senhaInicial(f) { const [y, m, d] = (f.nascimento || '').split('-'); return d && m && y ? d + m + y : ''; },
+  /* cria o acesso da pessoa (CPF + data de nascimento) sem tirar a gestão do login */
+  async criarAcesso(f) {
+    const cpf = String(f.cpf || '').replace(/\D/g, '');
+    if (cpf.length !== 11) return toast('Coloque o CPF completo na ficha', 'bad');
+    if (!f.nascimento) return toast('Coloque a data de nascimento na ficha', 'bad');
+    if (Store.mode === 'demo') { await Store.put('funcionarios', Object.assign({}, f, { portalUid: 'demo-' + f.id, portalCriado: D.hoje() })); return toast('Acesso criado (demonstração)'); }
+    const sec = firebase.apps.find(a => a.name === 'criar') || firebase.initializeApp(window.FIREBASE_CONFIG, 'criar');
+    let uid;
+    try { uid = (await sec.auth().createUserWithEmailAndPassword(this.email(f), this.senhaInicial(f))).user.uid; }
+    catch (e) {
+      if (e.code === 'auth/email-already-in-use') { try { uid = (await sec.auth().signInWithEmailAndPassword(this.email(f), this.senhaInicial(f))).user.uid; } catch (e2) { await sec.auth().signOut().catch(() => {}); return modal({ title: 'Acesso já existe', body: `<p style="margin:0">Já existe um acesso para este CPF e a pessoa já trocou a senha. Se ela esqueceu, apague o usuário <b>${esc(this.email(f))}</b> no Firebase (Authentication → Usuários) e crie o acesso de novo aqui.</p>`, foot: '<button class="btn primary" data-x>Ok</button>' }); } }
+      else { await sec.auth().signOut().catch(() => {}); return toast('Não consegui criar o acesso: ' + (e.code || e.message), 'bad'); }
+    }
+    await sec.auth().signOut().catch(() => {});
+    const n = await Store.put('funcionarios', Object.assign({}, f, { portalUid: uid, portalCriado: D.hoje() }));
+    await this.publicar(n, PX.dados);
+    this.instrucoes(n);
+  },
+  instrucoes(f) {
+    const link = location.href.replace(/[#?].*$/, '').replace(/index\.html$/, '').replace(/\/?$/, '/') + 'minha-area.html';
+    const msg = `Olá, ${f.nome.split(' ')[0]}! Agora você pode ver seu voucher, seu consumo e o seu ponto pelo celular, na Minha área da Xis da Gaúcha:\n\n${link}\n\nPara entrar: seu CPF (só números) e a sua data de nascimento (DDMMAAAA). No primeiro acesso, o app pede para você criar uma senha nova.`;
+    mandarMsg('Acesso à Minha área', f.telefone, msg);
+  },
+  /* monta o resumo que o funcionário vê */
+  resumo(f, d) {
+    const alvo = norm(f.nomePedidoX || f.nome), hoje = D.hoje(), mesAtual = hoje.slice(0, 7), mesAnt = D.addMeses(mesAtual + '-01', -1).slice(0, 7);
+    const r = { nome: f.nome, cargo: f.cargo || '', loja: Lojas.nome(f.loja), admissao: f.admissao || '', tempo: D.tempo(f.admissao), atualizado: Date.now() };
+    const k = Func.contrato(f); if (k && k.st !== 'efetivado') r.contrato = k.st === 'renovado' ? `Experiência renovada até ${D.fmt(k.fim2)}` : `Experiência até ${D.fmt(k.fim1)}`;
+    if (f.nascimento) r.aniversario = D.curto(f.nascimento);
+    r.uniformes = Func.pendUniformes(f.id).map(p => `${p.it.qtd}x ${p.it.peca}${p.it.tam ? ' (' + p.it.tam + ')' : ''}`);
+    r.ponto = Ponto.daPessoa(f.id).slice(0, 6).filter(p => p.lancado).map(p => ({ mes: p.mes, extras: +p.extras || 0, extrasValor: num(p.extrasValor), faltantes: +p.faltantes || 0, faltasInj: +p.faltasInj || 0, faltasJust: +p.faltasJust || 0, obs: p.obs || '', voucher: Ponto.voucher(p) }));
+    if (d) {
+      const meus = d.equipe.filter(x => norm(x.nome) === alvo && x.kind !== 'acerto');
+      const val = x => x.kind === 'consumo' || (x.extraTotal || 0) > 0;
+      const desc = x => x.kind === 'consumo' ? (x.items || []).map(l => `${l.qty}x ${l.name}`).join(', ') : `${x.refeicao || 'Refeição'} + adicional: ${(x.extras || []).map(e => e.qty + 'x ' + e.name).join(', ')}`;
+      const sit = x => x.pago ? (x.pago.acerto ? (/salário/.test(x.pago.forma || '') ? 'descontado no salário' : 'descontado no adiantamento') : 'pago') : x.aDescontar ? 'a descontar' : x.voucherUsado ? 'voucher' : '';
+      r.consumo = [mesAtual, mesAnt].map(mes => { const l = meus.filter(x => val(x) && D.str(new Date(x.at)).slice(0, 7) === mes).sort((a, b) => b.at - a.at); return { mes, itens: l.map(x => ({ at: x.at, desc: x.adiant ? 'Adiantamento' + (x.motivo ? ' · ' + x.motivo : '') : desc(x), total: x.adiant ? x.aDescontar : (x.total || x.extraTotal || 0), voucher: x.voucherUsado || 0, aDescontar: x.aDescontar || 0, sit: sit(x), adiant: !!x.adiant })), aDescontar: round2(l.filter(x => !x.pago).reduce((a, x) => a + (x.aDescontar || 0), 0)), voucherUsado: round2(l.reduce((a, x) => a + (x.voucherUsado || 0), 0)) }; });
+      const vs = d.vouchers.filter(v => norm(v.nome) === alvo);
+      r.voucher = { saldo: round2(vs.reduce((a, v) => a + (+v.saldo || 0), 0)), itens: vs.sort((a, b) => b.at - a.at).slice(0, 6).map(v => ({ valor: v.valor, saldo: v.saldo, motivo: v.motivo || '', at: v.at })) };
+      r.ligadoPedidoX = true;
+    }
+    return r;
+  },
+  async publicar(f, d) {
+    if (!f.portalUid || Store.mode === 'demo') return;
+    await Store.db.collection('portal').doc(f.portalUid).set(Object.assign({ funcId: f.id, ativo: f.status !== 'desligado' }, this.resumo(f, d)), { merge: true });
+  },
+  async publicarTodos(d) { for (const f of Store.all('funcionarios').filter(x => x.portalUid)) await this.publicar(f, d); }
+};
+const round2 = v => Math.round((+v || 0) * 100) / 100;
+
 /* ======================= TELAS ======================= */
 const S = { view: 'inicio', id: null, tab: 'dados', fTab: 'ativos', q: '', loja: '', calMes: null, uTab: 'entregas', advF: '', docF: '' };
-const NAV = [['inicio', 'home', 'Início'], ['funcs', 'users', 'Funcionários'], ['cal', 'cal', 'Calendário'], ['rec', 'search', 'Recrutamento'], ['unif', 'shirt', 'Uniformes'], ['adv', 'alert', 'Advertências'], ['docs', 'file', 'Documentos'], ['cfg', 'gear', 'Configurações']];
+const NAV = [['inicio', 'home', 'Início'], ['funcs', 'users', 'Funcionários'], ['cal', 'cal', 'Calendário'], ['rec', 'search', 'Recrutamento'], ['ponto', 'clock', 'Ponto do mês'], ['unif', 'shirt', 'Uniformes'], ['adv', 'alert', 'Advertências'], ['docs', 'file', 'Documentos'], ['cfg', 'gear', 'Configurações']];
 const MOTIVOS_SAIDA = ['Pedido de demissão', 'Dispensa sem justa causa', 'Dispensa por justa causa', 'Término do contrato de experiência', 'Acordo entre as partes (art. 484-A)', 'Abandono de emprego', 'Outro'];
 const CAT_ANEXO = ['Documento pessoal', 'Contrato', 'Advertência assinada', 'Termo de uniformes assinado', 'Atestado', 'Exame (ASO)', 'Outro'];
 
@@ -703,6 +882,7 @@ const App = {
     if (!Store.user) return this.login();
     await Store.listen();
     Store.on(() => this.render(true));
+    if (Store.mode === 'live') { let t; Store.on(() => { clearTimeout(t); t = setTimeout(() => Portal.publicarTodos(PX.dados).catch(() => {}), 20000); }); PX.init(); }
     window.addEventListener('hashchange', () => { this.fromHash(); this.render(); });
     this.fromHash(); this.render();
   },
@@ -730,7 +910,7 @@ const App = {
     $$('[data-nav]', this.root).forEach(b => b.onclick = () => this.go(b.dataset.nav));
     $('#nv-out').onclick = () => Store.logout();
     const dr = $('#dm-reset'); if (dr) dr.onclick = async () => { if (await confirmar('Apagar os dados da demonstração e começar de novo?', { ok: 'Zerar', perigo: true })) { localStorage.removeItem('dpx_demo'); location.reload(); } };
-    const pg = $('#pg'), fn = { inicio: vInicio, funcs: vFuncs, func: vFunc, cal: vCal, rec: vRec, unif: vUnif, adv: vAdv, docs: vDocs, cfg: vCfg }[S.view] || vInicio;
+    const pg = $('#pg'), fn = { inicio: vInicio, funcs: vFuncs, func: vFunc, cal: vCal, rec: vRec, ponto: vPonto, unif: vUnif, adv: vAdv, docs: vDocs, cfg: vCfg }[S.view] || vInicio;
     try { fn(pg); } catch (e) { console.error(e); pg.innerHTML = `<div class="alert bad">Erro nesta tela: ${esc(e.message)}</div>`; }
     if (fromStore) window.scrollTo(0, scroll);
   }
@@ -780,7 +960,7 @@ function vFuncs(pg) {
 function vFunc(pg) {
   const f = Func.get(S.id); if (!f) { pg.innerHTML = '<div class="empty">Funcionário não encontrado.</div>'; return; }
   const k = Func.contrato(f), desl = f.status === 'desligado', advs = Func.advDe(f.id), ents = Func.entregasDe(f.id), pend = Func.pendUniformes(f.id), docs = Store.all('docs').filter(d => d.funcId === f.id).sort((a, b) => b.criado - a.criado);
-  const tabs = [['dados', 'Dados'], ['contrato', 'Contrato'], ['anexos', `Documentos (${(f.anexos || []).length})`], ['adv', `Advertências (${advs.length})`], ['unif', `Uniformes${pend.length ? ' · ' + pend.length + ' com ele(a)' : ''}`], ['hist', 'Histórico']];
+  const tabs = [['dados', 'Dados'], ['contrato', 'Contrato'], ['anexos', `Documentos (${(f.anexos || []).length})`], ['adv', `Advertências (${advs.length})`], ['unif', `Uniformes${pend.length ? ' · ' + pend.length + ' com ele(a)' : ''}`], ['ponto', 'Ponto'], ['hist', 'Histórico']];
   const kv = (l, v) => `<div class="field"><span>${l}</span><div>${v || '<span class="muted">–</span>'}</div></div>`;
   let body = '';
   if (S.tab === 'dados') body = `<div class="card"><div class="sec" style="margin-top:0">Dados pessoais</div><div class="fgrid">${kv('Nascimento', f.nascimento ? `${D.fmt(f.nascimento)} · ${D.idade(f.nascimento)} anos` : '')}${kv('CPF', esc(f.cpf))}${kv('RG', esc([f.rg, f.rgOrgao].filter(Boolean).join(' · ')))}${kv('PIS', esc(f.pis))}${kv('CTPS', esc([f.ctps, f.ctpsSerie].filter(Boolean).join(' / ')))}${kv('Título de eleitor', esc(f.titulo))}${kv('Estado civil', esc(f.estadoCivil))}${kv('Escolaridade', esc(f.escolaridade))}${kv('Mãe', esc(f.mae))}${kv('Pai', esc(f.pai))}</div>
@@ -802,6 +982,7 @@ function vFunc(pg) {
       <div class="files">${(f.anexos || []).slice().sort((a, b) => b.at - a.at).map(a => `<div class="f">${ico('file')}<span class="grow"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.nome)}</a><br><span class="muted small">${esc(a.cat || '')} · ${fmtDT(a.at)}</span></span><button class="btn sm danger" data-axd="${a.id}">${ico('trash')}</button></div>`).join('') || '<p class="empty">Nenhum arquivo anexado.</p>'}</div></div>`;
   if (S.tab === 'adv') body = `<div class="card col"><div class="row"><h2 class="grow">Advertências e suspensões</h2>${!desl ? `<button class="btn primary" id="a-new">${ico('plus')} Nova advertência</button>` : ''}</div>${advTabela(advs, false)}</div>`;
   if (S.tab === 'unif') body = `<div class="card col"><div class="row"><h2 class="grow">Uniformes entregues</h2>${!desl ? `<button class="btn primary" id="u-new">${ico('plus')} Entregar uniforme</button>` : ''}</div>${entregasTabela(ents, false)}</div>`;
+  if (S.tab === 'ponto') { const ps = Ponto.daPessoa(f.id); body = `<div class="card col"><div class="row"><h2 class="grow">Ponto mês a mês</h2><button class="btn sm" id="pt-go">Lançar no Ponto do mês</button></div><table class="table"><thead><tr><th>Mês</th><th>Horas extras</th><th>Valor</th><th>Horas faltantes</th><th>Faltas sem justif.</th><th>Com atestado</th><th>Voucher</th><th>Obs.</th></tr></thead><tbody>${ps.map(p => `<tr><td style="text-transform:capitalize">${Ponto.mesTxt(p.mes)}</td><td>${fmtH(p.extras)}</td><td>${p.extrasValor ? brl(p.extrasValor) : '–'}</td><td>${fmtH(p.faltantes)}</td><td>${p.faltasInj || 0}</td><td>${p.faltasJust || 0}</td><td>${Ponto.voucher(p) ? '<span class="pill ok">tem direito</span>' : '<span class="pill bad">não</span>'}</td><td class="small">${esc(p.obs || '')}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nada lançado ainda.</td></tr>'}</tbody></table></div>`; }
   if (S.tab === 'hist') {
     const h = [];
     h.push(...docs.map(d => ({ at: d.criado, t: DOCS[d.tipo]?.nome || d.tipo, s: d.tipo === 'advertencia' ? advResumo(d) : '', doc: d })));
@@ -815,7 +996,7 @@ function vFunc(pg) {
   }
   pg.innerHTML = `<button class="btn ghost sm" id="fb" style="margin-bottom:8px">${ico('back')} Funcionários</button>
     <div class="head"><div class="av" style="width:56px;height:56px;font-size:20px">${iniciais(f.nome)}</div><div class="grow"><h1>${esc(f.nome)}</h1><div class="sub">${esc(f.cargo || 'sem cargo')} · ${esc(Lojas.nome(f.loja))} · ${desl ? 'saiu em ' + D.fmt(f.desligamento?.data) : D.tempo(f.admissao) + ' de casa'} ${Func.contratoPill(f)}</div></div>
-    <button class="btn" id="fe">${ico('edit')} Editar ficha</button><button class="btn" id="fp">${ico('print')} Imprimir ficha</button>${desl ? `<button class="btn primary" id="fr">Readmitir</button>` : `<button class="btn danger" id="fd">Desligar</button>`}</div>
+    ${!desl ? `<button class="btn" id="fma">${ico('user')} ${f.portalUid ? 'Minha área' : 'Criar acesso à Minha área'}</button>` : ''}<button class="btn" id="fe">${ico('edit')} Editar ficha</button><button class="btn" id="fp">${ico('print')} Imprimir ficha</button>${desl ? `<button class="btn primary" id="fr">Readmitir</button>` : `<button class="btn danger" id="fd">Desligar</button>`}</div>
     ${pend.length && desl ? `<div class="alert bad" style="margin-bottom:12px">Ficou com ${pend.length} ${pend.length > 1 ? 'peças' : 'peça'} de uniforme sem devolver.</div>` : ''}
     <div class="tabs">${tabs.map(([t, l]) => `<button data-tb="${t}" class="${S.tab === t ? 'on' : ''}">${l}</button>`).join('')}</div>${body}`;
   $('#fb', pg).onclick = () => App.go('funcs');
@@ -827,7 +1008,7 @@ function vFunc(pg) {
   const on = (id, fn) => { const e = $(id, pg); if (e) e.onclick = fn; };
   on('#c-ren', () => renovar(f)); on('#c-efe', () => efetivar(f)); on('#c-enc', () => desligar(f, 'Término do contrato de experiência'));
   on('#c-volta', async () => { if (await confirmar('Voltar o contrato para experiência?')) Store.put('funcionarios', Object.assign({}, f, { contratoStatus: f.renovadoEm ? 'renovado' : 'exp1', efetivadoEm: '' })); });
-  on('#c-pr', () => imprimirDoc('prorrogacao', f)); on('#a-new', () => novaAdvertencia(f.id)); on('#u-new', () => entregarUniforme(f.id));
+  on('#c-pr', () => imprimirDoc('prorrogacao', f)); on('#pt-go', () => App.go('ponto')); on('#fma', () => f.portalUid ? Portal.instrucoes(f) : Portal.criarAcesso(f)); on('#a-new', () => novaAdvertencia(f.id)); on('#u-new', () => entregarUniforme(f.id));
   const ax = $('#ax-f', pg); if (ax) ax.onchange = () => anexar(f, [...ax.files], $('#ax-cat', pg).value);
   $$('[data-axd]', pg).forEach(b => b.onclick = async () => { const a = (f.anexos || []).find(x => x.id === b.dataset.axd); if (!a || !(await confirmar(`Apagar o arquivo "${esc(a.nome)}"?`, { ok: 'Apagar', perigo: true }))) return; await Store.apagarArquivo(a); Store.put('funcionarios', Object.assign({}, f, { anexos: f.anexos.filter(x => x.id !== a.id) })); });
   ligarTabelas(pg);
@@ -846,7 +1027,7 @@ function editarFicha(f) {
   const m = modal({ title: novo ? 'Novo funcionário' : 'Editar ficha', wide: true, body: `
     <div class="sec" style="margin-top:0">Dados pessoais</div><div class="fgrid">${F('Nome completo *', 'nome', f.nome, { cls: 'w2' })}${F('Data de nascimento', 'nascimento', f.nascimento, { type: 'date' })}${F('CPF', 'cpf', f.cpf, { ph: '000.000.000-00' })}${F('RG', 'rg', f.rg)}${F('Órgão emissor', 'rgOrgao', f.rgOrgao, { ph: 'SSP/SC' })}${F('PIS', 'pis', f.pis)}${F('CTPS nº', 'ctps', f.ctps)}${F('CTPS série', 'ctpsSerie', f.ctpsSerie)}${F('Título de eleitor', 'titulo', f.titulo)}${F('Estado civil', 'estadoCivil', f.estadoCivil, { type: 'select', opts: ['', 'Solteiro(a)', 'Casado(a)', 'União estável', 'Divorciado(a)', 'Viúvo(a)'] })}${F('Escolaridade', 'escolaridade', f.escolaridade, { type: 'select', opts: ['', 'Fundamental incompleto', 'Fundamental completo', 'Médio incompleto', 'Médio completo', 'Superior incompleto', 'Superior completo'] })}${F('Nome da mãe', 'mae', f.mae, { cls: 'w2' })}${F('Nome do pai', 'pai', f.pai, { cls: 'w2' })}</div>
     <div class="sec">Contato e endereço</div><div class="fgrid">${F('Telefone / WhatsApp', 'telefone', f.telefone)}${F('E-mail', 'email', f.email, { type: 'email' })}${F('Endereço', 'endereco', f.endereco, { cls: 'w2' })}${F('Bairro', 'bairro', f.bairro)}${F('Cidade / UF', 'cidade', f.cidade)}${F('CEP', 'cep', f.cep)}${F('Contato de emergência', 'emergencia', f.emergencia, { ph: 'Nome e telefone', cls: 'w2' })}</div>
-    <div class="sec">Trabalho e contrato</div><div class="fgrid">${F('Cargo', 'cargo', f.cargo, { attrs: 'list="dl-cargos"' })}<datalist id="dl-cargos">${c.cargos.map(x => `<option value="${esc(x)}">`).join('')}</datalist>${F('Loja', 'loja', f.loja, { type: 'select', opts: lojas })}${F('Salário (R$)', 'salario', f.salario, { type: 'money', ph: '0,00' })}${F('Horário', 'horario', f.horario, { ph: 'Ex.: 17:05 às 01:00' })}${F('Carga horária', 'carga', f.carga, { ph: 'Ex.: 44h semanais' })}<div class="field w2"><span>Dias de trabalho</span><div class="chips">${SEMANA.map((d, i) => `<label class="row small" style="gap:4px;border:1px solid var(--line);border-radius:20px;padding:5px 10px"><input type="checkbox" data-dia="${i}" ${(f.dias || [2, 3, 4, 5, 6, 0]).includes(i) ? 'checked' : ''}>${d.slice(0, 3)}</label>`).join('')}</div></div>${F('Data de admissão *', 'admissao', f.admissao, { type: 'date' })}${F('1º período (dias)', 'exp1', f.exp1 || c.exp1, { type: 'number' })}${F('Renovação (dias)', 'exp2', f.exp2 || c.exp2, { type: 'number' })}${F('Situação do contrato', 'contratoStatus', f.contratoStatus || 'exp1', { type: 'select', opts: [['exp1', 'Experiência (1º período)'], ['renovado', 'Experiência renovada'], ['efetivado', 'Efetivado']] })}${F('Chave Pix / banco', 'pix', f.pix)}${F('Próximo exame (ASO)', 'proxExame', f.proxExame, { type: 'date' })}</div>
+    <div class="sec">Trabalho e contrato</div><div class="fgrid">${F('Cargo', 'cargo', f.cargo, { attrs: 'list="dl-cargos"' })}<datalist id="dl-cargos">${c.cargos.map(x => `<option value="${esc(x)}">`).join('')}</datalist>${F('Loja', 'loja', f.loja, { type: 'select', opts: lojas })}${F('Salário (R$)', 'salario', f.salario, { type: 'money', ph: '0,00' })}${F('Horário', 'horario', f.horario, { ph: 'Ex.: 17:05 às 01:00' })}${F('Carga horária', 'carga', f.carga, { ph: 'Ex.: 44h semanais' })}<div class="field w2"><span>Dias de trabalho</span><div class="chips">${SEMANA.map((d, i) => `<label class="row small" style="gap:4px;border:1px solid var(--line);border-radius:20px;padding:5px 10px"><input type="checkbox" data-dia="${i}" ${(f.dias || [2, 3, 4, 5, 6, 0]).includes(i) ? 'checked' : ''}>${d.slice(0, 3)}</label>`).join('')}</div></div>${F('Data de admissão *', 'admissao', f.admissao, { type: 'date' })}${F('1º período (dias)', 'exp1', f.exp1 || c.exp1, { type: 'number' })}${F('Renovação (dias)', 'exp2', f.exp2 || c.exp2, { type: 'number' })}${F('Situação do contrato', 'contratoStatus', f.contratoStatus || 'exp1', { type: 'select', opts: [['exp1', 'Experiência (1º período)'], ['renovado', 'Experiência renovada'], ['efetivado', 'Efetivado']] })}${F('Chave Pix / banco', 'pix', f.pix)}${F('Nome no Pedido X (se for diferente)', 'nomePedidoX', f.nomePedidoX, { ph: 'Como aparece no caixa' })}${F('Próximo exame (ASO)', 'proxExame', f.proxExame, { type: 'date' })}</div>
     <div class="sec">Tamanhos de uniforme</div><div class="fgrid">${F('Camiseta', 'tamCamiseta', f.tamCamiseta, { ph: 'P, M, G, GG' })}${F('Calça', 'tamCalca', f.tamCalca, { ph: '38, 40, 42…' })}${F('Calçado', 'tamCalcado', f.tamCalcado, { ph: '36, 38…' })}</div>
     ${F('Observações', 'obs', f.obs, { type: 'area' })}`,
     foot: `${!novo ? '<button class="btn danger" id="ef-del" style="margin-right:auto">Excluir</button>' : ''}<button class="btn" data-x>Cancelar</button><button class="btn primary" id="ef-ok">${novo ? 'Cadastrar' : 'Salvar'}</button>` });
@@ -1116,6 +1297,8 @@ function vCfg(pg) {
     <div class="card"><h2>Mensagens prontas (WhatsApp)</h2><p class="muted small">Campos que se preenchem sozinhos: {primeiro} {nome} {cargo} {semana} {dia} {data} {hora} {endereco} {local} {exames} {combinado}</p><div class="col" style="margin-top:8px">${[['entrevista', 'Confirmação de entrevista'], ['teste', 'Confirmação de teste'], ['exame', 'Exame admissional'], ['aniversario', 'Aniversário']].map(([k, t]) => F(t, `msgs.${k}`, (c.msgs || DEFAULT_CFG.msgs)[k], { type: 'area', attrs: 'style="min-height:150px"' })).join('')}</div></div>
     <div class="card"><h2>Cargos</h2>${F('Um por linha', 'cargosTxt', c.cargos.join('\n'), { type: 'area' })}</div>
     <div class="card"><h2>Motivos de advertência</h2><p class="muted small">O nome aparece na lista para marcar; o texto entra no documento, depois de "o(a) funcionário(a)…".</p><div id="cf-mo" class="col" style="gap:8px">${c.motivosAdv.map((mo, i) => `<div class="row" style="flex-wrap:nowrap;align-items:flex-start"><input class="input" data-mn="${i}" value="${esc(mo.nome)}" style="max-width:300px"><textarea class="input" data-mt="${i}" style="min-height:38px">${esc(mo.texto)}</textarea><button class="btn sm ghost" data-mx="${i}">×</button></div>`).join('')}</div><button class="btn sm" id="cf-madd" style="margin-top:8px">${ico('plus')} Motivo</button></div>
+    <div class="card col"><h2>Pedido X e Minha área</h2>${Store.mode === 'demo' ? '<p class="muted" style="margin:0">Disponível no sistema publicado.</p>' : PX.ligado() ? `<div class="row"><span class="pill ok">ligado</span><span class="muted small grow">${esc(PX.user.email)}${PX.ultimo ? ' · atualizado ' + fmtDT(PX.ultimo) : ''}${PX.erro ? ' · erro: ' + esc(PX.erro) : ''}</span><button class="btn sm" id="px-sync">${ico('refresh')} Atualizar agora</button><button class="btn sm danger" id="px-out">Desligar</button></div>` : `<div class="row"><span class="pill">não ligado</span><span class="muted small grow">Ligue para a Minha área mostrar consumo e voucher, e para quem for desligado sumir do caixa.</span><button class="btn sm primary" id="px-in">${ico('link')} Ligar ao Pedido X</button></div>`}
+      <p class="muted small" style="margin:0">Link da Minha área para os funcionários: <b>${esc(location.href.replace(/[#?].*$/, '').replace(/index\.html$/, '').replace(/\/?$/, '/'))}minha-area.html</b>. O acesso de cada um é criado na ficha (botão "Criar acesso à Minha área").</p></div>
     <div class="card"><h2>Acesso</h2><p class="muted" style="margin:6px 0 0">Quem entra no DP X é criado no Firebase deste app, em <b>Authentication → Usuários → Adicionar usuário</b>. Crie só para a gestão (você e o Tiago).</p></div></div>`;
   const ler = () => {
     const o = JSON.parse(JSON.stringify(c)); $$('[data-k]', pg).forEach(i => { if (i.dataset.k === 'cargosTxt') o.cargos = i.value.split('\n').map(s => s.trim()).filter(Boolean); else setDeep(o, i.dataset.k, i.type === 'checkbox' ? i.checked : i.value.trim()); });
@@ -1124,6 +1307,7 @@ function vCfg(pg) {
     o.motivosAdv = $$('[data-mn]', pg).map(i => { const n = +i.dataset.mn, ant = c.motivosAdv[n]; return { id: ant ? ant.id : uid(), nome: i.value.trim(), texto: $(`[data-mt="${n}"]`, pg).value.trim() }; }).filter(x => x.nome);
     return o;
   };
+  const on2 = (id, fn) => { const e = $(id, pg); if (e) e.onclick = fn; }; on2('#px-in', () => PX.ligar()); on2('#px-sync', () => PX.sync(true)); on2('#px-out', () => PX.sair());
   $('#cf-sv', pg).onclick = async () => { const o = ler(); if (o.exp1 + o.exp2 > 90) return toast('O contrato de experiência não pode passar de 90 dias', 'bad'); await Store.setCfg(o); toast('Configurações salvas'); };
   $('#cf-fadd', pg).onclick = () => { Store.cfgDoc = Object.assign(ler(), { feriadosLocais: [...ler().feriadosLocais, { md: '', nome: ' ', loja: '' }] }); App.render(); };
   $('#cf-madd', pg).onclick = () => { const o = ler(); o.motivosAdv.push({ id: uid(), nome: 'Novo motivo', texto: '' }); Store.cfgDoc = o; App.render(); };
@@ -1149,6 +1333,7 @@ function demoSeed() {
   add('candidatos', { nome: 'Gabriel Candidato', telefone: '(48) 9 8888-0000', cargo: 'Chapeiro', loja: 'barreiros', origem: 'Indicação', fuma: '', etapa: 'entrevista', entrevista: { data: D.add(h, 1), hora: '15:00', obs: '' } });
   add('candidatos', { nome: 'Isabela Candidata', telefone: '(48) 9 6666-0000', cargo: 'Auxiliar de cozinha', loja: 'palhoca', origem: 'WhatsApp Administrativo', fuma: 'nao', etapa: 'exame', entrevista: { data: D.add(h, -6), hora: '14:00', resultado: 'passou para o teste' }, teste: { data: D.add(h, -4), hora: '17:00', diasPrev: 3, diasFeitos: 3, valor: 100, pago: D.add(h, -1), resultado: 'aprovado' }, exame: { data: D.add(h, 2), hora: '13:20', local: 'Rua Bernardo Scheidt, 88, Palhoça, Santa Catarina', exames: 'Admissional + Manipulação de Alimentos', valor: 73.5, feito: '' } });
   add('candidatos', { nome: 'Helena Candidata', telefone: '(48) 9 7777-0000', cargo: 'Chapeiro', loja: 'barreiros', origem: 'Instagram', fuma: 'nao', etapa: 'novo' });
+  { const m = D.addMeses(h.slice(0, 7) + '-01', -1).slice(0, 7); s.funcionarios && Object.values(s.funcionarios).filter(f => f.status !== 'desligado').forEach((f, i) => add('ponto', { id: f.id + '_' + m, funcId: f.id, mes: m, lancado: true, extras: [2.5, 0, 4, 1][i % 4], extrasValor: 0, faltantes: [0, 0.75, 0, 0][i % 4], faltasInj: [0, 0, 0, 1][i % 4], faltasJust: 0, obs: '' })); }
   add('eventos', { titulo: 'Reunião de equipe', data: D.add(h, 3), hora: '15:00', loja: '', repetir: '' });
   add('eventos', { titulo: 'Dedetização', data: D.add(h, 12), hora: '09:00', loja: 'barreiros', repetir: 'mensal' });
   return s;
