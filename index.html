@@ -94,6 +94,7 @@ textarea.input{min-height:80px;resize:vertical}
 }
 .table a{color:var(--ink)}.table a:hover{color:var(--acc)}
 a.btn{color:var(--ink);text-decoration:none}
+.pv-ov{position:fixed;inset:0;z-index:80;background:#e9ece9;display:flex;flex-direction:column}.pv-bar{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#121614;color:#fff}.pv-bar .btn:not(.primary){color:var(--ink)}.pv-fr{flex:1;border:0;width:100%;background:#e9ece9}
 </style></head>
 <body><div id="app"></div><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script><script src="config.js"></script><script>/* DP X · Departamento pessoal do Xis da Gaúcha — núcleo */
 const APP_VERSION = '1.3.0';
@@ -404,10 +405,19 @@ table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 12px}th,td
 .ck{display:inline-block;width:11px;height:11px;border:1px solid #111;margin-right:5px;vertical-align:-1px;text-align:center;font-size:10px;line-height:11px}
 @media print{body{background:#fff}.pbar{display:none}.pg{margin:0;box-shadow:none;width:auto;min-height:auto;padding:12mm 14mm}@page{size:A4;margin:0}}`;
 
+/* visualização de impressão dentro do próprio app (sem abrir outra janela) */
 function imprimir(titulo, paginas) {
-  const w = window.open('', '_blank'); if (!w) return toast('Libere as janelas (pop-up) para imprimir', 'bad');
-  w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>${PRINT_CSS}</style></head><body><div class="pbar"><button class="p" onclick="print()">Imprimir</button><button class="c" onclick="close()">Fechar</button></div>${paginas.join('')}</body></html>`);
-  w.document.close();
+  if (!paginas.length) paginas = ['<div class="pg"><p style="text-align:center;margin-top:40mm;font-size:16px">Nada para imprimir.</p></div>'];
+  const doc = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>${PRINT_CSS}</style></head><body>${paginas.join('')}</body></html>`;
+  $$('.pv-ov').forEach(x => x.remove());
+  const ov = document.createElement('div'); ov.className = 'pv-ov';
+  ov.innerHTML = `<div class="pv-bar"><b class="grow">${esc(titulo)}</b><button class="btn primary" data-pv="p">${ico('print')} Imprimir</button><button class="btn" data-pv="x">Fechar</button></div><iframe class="pv-fr" title="Visualização"></iframe>`;
+  document.body.appendChild(ov);
+  const fr = $('.pv-fr', ov); fr.srcdoc = doc;
+  const fechar = () => { ov.remove(); document.removeEventListener('keydown', k); };
+  const k = e => { if (e.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', k);
+  ov.addEventListener('click', e => { const b = e.target.closest('[data-pv]'); if (!b) return; if (b.dataset.pv === 'x') return fechar(); try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch (er) { toast('Não consegui abrir a impressão', 'bad'); } });
 }
 function cab(lojaId) {
   const l = Lojas.get(lojaId) || {};
@@ -867,6 +877,24 @@ const Portal = {
 };
 const round2 = v => Math.round((+v || 0) * 100) / 100;
 
+/* traz para o DP X quem já está cadastrado no Pedido X (para não digitar de novo) */
+async function trazerPedidoX() {
+  let d = PX.dados; if (!d) { toast('Buscando no Pedido X…'); try { d = PX.dados = await PX.ler(); } catch (e) { return toast('Não consegui ler o Pedido X: ' + (e.code || e.message), 'bad'); } }
+  const ja = new Set(Store.all('funcionarios').map(f => norm(f.nomePedidoX || f.nome)));
+  const novos = d.pessoas.filter(p => !p.inativo && !ja.has(norm(p.nome))).sort((a, b) => a.nome.localeCompare(b.nome));
+  if (!novos.length) return toast('Todo mundo do Pedido X já está no DP X');
+  const lj = p => (Array.isArray(p.lojas) && p.lojas.length ? p.lojas[0] : p.loja) || Lojas.list()[0].id;
+  const m = modal({ title: 'Trazer do Pedido X', wide: true, body: `<p style="margin:0">Estas pessoas estão no Pedido X e ainda não têm ficha aqui. Marque quem trabalha com vocês hoje. Depois complete a ficha de cada um (CPF, nascimento, data de entrada…).</p>
+    <div class="grid g2" style="gap:6px">${novos.map((p, i) => `<label class="check"><input type="checkbox" data-np="${i}" checked><span><b>${esc(p.nome)}</b><br><span class="muted small">${p.tipo === 'entregador' ? 'Entregador' : 'Funcionário'} · ${esc(Lojas.curto(lj(p)))}${(p.lojas || []).length > 1 ? ' e outra loja' : ''}</span></span></label>`).join('')}</div>`,
+    foot: '<button class="btn" data-x>Cancelar</button><button class="btn primary" id="np-ok">Trazer marcados</button>' });
+  $('#np-ok', m.el).onclick = async () => {
+    const sel = $$('[data-np]', m.el).filter(i => i.checked).map(i => novos[+i.dataset.np]); if (!sel.length) return toast('Marque ao menos um', 'bad');
+    $('#np-ok', m.el).disabled = true;
+    for (const p of sel) await Store.put('funcionarios', { nome: p.nome, loja: lj(p), cargo: p.tipo === 'entregador' ? 'Entregador' : '', status: 'ativo', contratoStatus: 'efetivado', exp1: Store.cfg().exp1, exp2: Store.cfg().exp2, admissao: '', obs: 'Trazido do Pedido X — completar a ficha.' });
+    m.close(); toast(`${sel.length} ${sel.length === 1 ? 'pessoa trazida' : 'pessoas trazidas'}. Complete as fichas.`);
+  };
+}
+
 /* ======================= TELAS ======================= */
 const S = { view: 'inicio', id: null, tab: 'dados', fTab: 'ativos', q: '', loja: '', calMes: null, uTab: 'entregas', advF: '', docF: '' };
 const NAV = [['inicio', 'home', 'Início'], ['funcs', 'users', 'Funcionários'], ['cal', 'cal', 'Calendário'], ['rec', 'search', 'Recrutamento'], ['ponto', 'clock', 'Ponto do mês'], ['unif', 'shirt', 'Uniformes'], ['adv', 'alert', 'Advertências'], ['docs', 'file', 'Documentos'], ['cfg', 'gear', 'Configurações']];
@@ -941,7 +969,7 @@ function vInicio(pg) {
 function vFuncs(pg) {
   const lista = (S.fTab === 'desligados' ? Func.desligados() : Func.ativos()).filter(f => (!S.loja || f.loja === S.loja) && (!S.q || norm(f.nome + ' ' + (f.cargo || '') + ' ' + (f.cpf || '')).includes(norm(S.q))));
   const desl = S.fTab === 'desligados';
-  pg.innerHTML = `<div class="head"><div class="grow"><h1>Funcionários</h1><div class="sub">Clique em alguém para abrir a ficha.</div></div><button class="btn" id="f-pr">${ico('print')} Fichas em branco</button><button class="btn primary" id="f-new">${ico('plus')} Funcionário</button></div>
+  pg.innerHTML = `<div class="head"><div class="grow"><h1>Funcionários</h1><div class="sub">Clique em alguém para abrir a ficha.</div></div>${PX.ligado() ? `<button class="btn" id="f-px">${ico('link')} Trazer do Pedido X</button>` : ''}<button class="btn" id="f-pr">${ico('print')} Fichas em branco</button><button class="btn primary" id="f-new">${ico('plus')} Funcionário</button></div>
     <div class="tabs"><button data-ft="ativos" class="${!desl ? 'on' : ''}">Ativos (${Func.ativos().length})</button><button data-ft="desligados" class="${desl ? 'on' : ''}">Desligados (${Func.desligados().length})</button></div>
     <div class="row" style="margin-bottom:12px"><input class="input" id="f-q" placeholder="Buscar por nome, cargo ou CPF" value="${esc(S.q)}" style="max-width:320px"><div class="chips">${[['', 'Todas as lojas'], ...Lojas.list().map(l => [l.id, Lojas.curto(l.id)])].map(([k, t]) => `<button data-fl="${k}" class="${S.loja === k ? 'on' : ''}">${esc(t)}</button>`).join('')}</div></div>
     <table class="table"><thead><tr><th>Nome</th><th>Cargo</th><th>Loja</th><th>${desl ? 'Saída' : 'Admissão'}</th><th>${desl ? 'Motivo' : 'Tempo de casa'}</th><th>${desl ? 'Tempo na empresa' : 'Contrato'}</th></tr></thead><tbody>
@@ -954,13 +982,14 @@ function vFuncs(pg) {
   const q = $('#f-q', pg); let t; q.oninput = () => { clearTimeout(t); t = setTimeout(() => { S.q = q.value; App.render(); const n = $('#f-q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
   $('#f-new', pg).onclick = () => editarFicha(null);
   $('#f-pr', pg).onclick = () => imprimirDoc('ficha', { nome: '', loja: Lojas.list()[0].id });
+  const fpx = $('#f-px', pg); if (fpx) fpx.onclick = () => trazerPedidoX();
 }
 
 /* ---------- FICHA ---------- */
 function vFunc(pg) {
   const f = Func.get(S.id); if (!f) { pg.innerHTML = '<div class="empty">Funcionário não encontrado.</div>'; return; }
   const k = Func.contrato(f), desl = f.status === 'desligado', advs = Func.advDe(f.id), ents = Func.entregasDe(f.id), pend = Func.pendUniformes(f.id), docs = Store.all('docs').filter(d => d.funcId === f.id).sort((a, b) => b.criado - a.criado);
-  const tabs = [['dados', 'Dados'], ['contrato', 'Contrato'], ['anexos', `Documentos (${(f.anexos || []).length})`], ['adv', `Advertências (${advs.length})`], ['unif', `Uniformes${pend.length ? ' · ' + pend.length + ' com ele(a)' : ''}`], ['ponto', 'Ponto'], ['hist', 'Histórico']];
+  const tabs = [['dados', 'Dados'], ['contrato', 'Contrato'], ['anexos', `Documentos (${(f.anexos || []).length})`], ['adv', `Advertências (${advs.length})`], ['unif', `Uniformes${pend.length ? ' · ' + pend.length + ' com ele(a)' : ''}`], ['ponto', 'Ponto'], ['consumo', 'Consumo e voucher'], ['hist', 'Histórico']];
   const kv = (l, v) => `<div class="field"><span>${l}</span><div>${v || '<span class="muted">–</span>'}</div></div>`;
   let body = '';
   if (S.tab === 'dados') body = `<div class="card"><div class="sec" style="margin-top:0">Dados pessoais</div><div class="fgrid">${kv('Nascimento', f.nascimento ? `${D.fmt(f.nascimento)} · ${D.idade(f.nascimento)} anos` : '')}${kv('CPF', esc(f.cpf))}${kv('RG', esc([f.rg, f.rgOrgao].filter(Boolean).join(' · ')))}${kv('PIS', esc(f.pis))}${kv('CTPS', esc([f.ctps, f.ctpsSerie].filter(Boolean).join(' / ')))}${kv('Título de eleitor', esc(f.titulo))}${kv('Estado civil', esc(f.estadoCivil))}${kv('Escolaridade', esc(f.escolaridade))}${kv('Mãe', esc(f.mae))}${kv('Pai', esc(f.pai))}</div>
@@ -983,6 +1012,13 @@ function vFunc(pg) {
   if (S.tab === 'adv') body = `<div class="card col"><div class="row"><h2 class="grow">Advertências e suspensões</h2>${!desl ? `<button class="btn primary" id="a-new">${ico('plus')} Nova advertência</button>` : ''}</div>${advTabela(advs, false)}</div>`;
   if (S.tab === 'unif') body = `<div class="card col"><div class="row"><h2 class="grow">Uniformes entregues</h2>${!desl ? `<button class="btn primary" id="u-new">${ico('plus')} Entregar uniforme</button>` : ''}</div>${entregasTabela(ents, false)}</div>`;
   if (S.tab === 'ponto') { const ps = Ponto.daPessoa(f.id); body = `<div class="card col"><div class="row"><h2 class="grow">Ponto mês a mês</h2><button class="btn sm" id="pt-go">Lançar no Ponto do mês</button></div><table class="table"><thead><tr><th>Mês</th><th>Horas extras</th><th>Valor</th><th>Horas faltantes</th><th>Faltas sem justif.</th><th>Com atestado</th><th>Voucher</th><th>Obs.</th></tr></thead><tbody>${ps.map(p => `<tr><td style="text-transform:capitalize">${Ponto.mesTxt(p.mes)}</td><td>${fmtH(p.extras)}</td><td>${p.extrasValor ? brl(p.extrasValor) : '–'}</td><td>${fmtH(p.faltantes)}</td><td>${p.faltasInj || 0}</td><td>${p.faltasJust || 0}</td><td>${Ponto.voucher(p) ? '<span class="pill ok">tem direito</span>' : '<span class="pill bad">não</span>'}</td><td class="small">${esc(p.obs || '')}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nada lançado ainda.</td></tr>'}</tbody></table></div>`; }
+  if (S.tab === 'consumo') {
+    if (!PX.ligado() || !PX.dados) body = `<div class="card muted">${PX.ligado() ? 'Buscando no Pedido X… clique em Configurações → Atualizar agora se demorar.' : 'Ligue ao Pedido X em Configurações para ver o consumo e o voucher aqui.'}</div>`;
+    else { const r = Portal.resumo(f, PX.dados), v = r.voucher || { saldo: 0, itens: [] };
+      body = `<div class="kpis"><div class="kpi"><span class="l">Voucher</span><span class="v">${brl(v.saldo)}</span></div>${(r.consumo || []).map(m => `<div class="kpi"><span class="l">A descontar · ${esc(Ponto.mesTxt(m.mes))}</span><span class="v">${brl(m.aDescontar)}</span>${m.voucherUsado ? `<span class="muted small">${brl(m.voucherUsado)} com voucher</span>` : ''}</div>`).join('')}</div>
+      ${(r.consumo || []).map(m => `<div class="card col" style="margin-bottom:12px"><h2 style="text-transform:capitalize">${esc(Ponto.mesTxt(m.mes))}</h2><table class="table"><thead><tr><th>Data</th><th>O que pegou</th><th class="r">Valor</th><th class="r">Voucher</th><th>Situação</th></tr></thead><tbody>${m.itens.map(x => `<tr><td class="num">${fmtDT(x.at)}</td><td>${esc(x.desc)}</td><td class="r num">${brl(x.adiant ? x.total : x.aDescontar || x.total)}</td><td class="r num">${x.voucher ? brl(x.voucher) : '–'}</td><td>${x.sit ? `<span class="pill ${x.sit === 'a descontar' ? 'warn' : 'ok'}">${esc(x.sit)}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Nada lançado.</td></tr>'}</tbody></table></div>`).join('')}
+      <p class="muted small">Dados do Pedido X, atualizados ${PX.ultimo ? fmtDT(PX.ultimo) : ''}. Se não aparecer nada e a pessoa consome, confira o "Nome no Pedido X" na ficha.</p>`; }
+  }
   if (S.tab === 'hist') {
     const h = [];
     h.push(...docs.map(d => ({ at: d.criado, t: DOCS[d.tipo]?.nome || d.tipo, s: d.tipo === 'advertencia' ? advResumo(d) : '', doc: d })));
