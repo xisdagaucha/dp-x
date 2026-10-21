@@ -37,11 +37,12 @@ const mesTxt = m => { const [y, n] = m.split('-'); return MESES[+n - 1] + ' de '
 const fmtH = h => { h = +h || 0; let H = Math.floor(h), M = Math.round((h - H) * 60); if (M === 60) { H++; M = 0; } return H + ':' + String(M).padStart(2, '0'); };
 const dt = t => { const d = new Date(t); return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'); };
 const dataBr = s => s ? s.split('-').reverse().join('/') : '–';
-let db, user, doc = null, aba = 'resumo';
+let db, user, doc = null, aba = 'resumo', fb;
 if (!window.FIREBASE_CONFIG) { app.innerHTML = '<div class="card">O sistema ainda não foi configurado.</div>'; }
 else {
-  firebase.initializeApp(window.FIREBASE_CONFIG); db = firebase.firestore();
-  firebase.auth().onAuthStateChanged(async u => { user = u; if (!u) return login(); await carregar(); });
+  /* app separado: o login do funcionário não mistura com o da gestão no mesmo navegador */
+  fb = firebase.initializeApp(window.FIREBASE_CONFIG, 'minha-area'); db = fb.firestore();
+  fb.auth().onAuthStateChanged(async u => { user = u; if (!u) return login(); if (!String(u.email || '').endsWith('@' + DOM)) { await fb.auth().signOut(); return; } await carregar(); });
 }
 function login(msg) {
   app.innerHTML = `<div class="card"><h2>Entrar</h2><label>CPF (só números)</label><input id="cpf" inputmode="numeric" autocomplete="username" maxlength="14"><label>Senha</label><input id="pw" type="password" inputmode="numeric" autocomplete="current-password"><p class="small mut" style="margin:-4px 0 12px">No primeiro acesso, a senha é a sua data de nascimento (DDMMAAAA). Ex.: 05031998</p><div class="err" id="er">${esc(msg || '')}</div><button id="go">Entrar</button></div><p class="small mut" style="text-align:center">Esqueceu a senha? Fale com a gestão.</p>`;
@@ -49,7 +50,7 @@ function login(msg) {
     const cpf = $('#cpf').value.replace(/\D/g, ''), pw = $('#pw').value.trim();
     if (cpf.length !== 11) return $('#er').textContent = 'Digite os 11 números do CPF.';
     $('#go').disabled = true; $('#er').textContent = '';
-    try { await firebase.auth().signInWithEmailAndPassword(cpf + '@' + DOM, pw); }
+    try { await fb.auth().signInWithEmailAndPassword(cpf + '@' + DOM, pw); }
     catch (e) { $('#go').disabled = false; $('#er').textContent = /too-many/.test(e.code) ? 'Muitas tentativas. Espere alguns minutos.' : 'CPF ou senha incorretos.'; }
   };
   $('#go').onclick = go; $('#pw').onkeydown = e => { if (e.key === 'Enter') go(); };
@@ -57,8 +58,8 @@ function login(msg) {
 async function carregar() {
   try { const s = await db.collection('portal').doc(user.uid).get(); doc = s.exists ? s.data() : null; }
   catch (e) { doc = null; }
-  if (!doc) { app.innerHTML = `<div class="card">Seu acesso ainda está sendo preparado pela gestão. Tente de novo mais tarde.</div><button class="sec" onclick="firebase.auth().signOut()">Sair</button>`; return; }
-  if (doc.ativo === false) { app.innerHTML = `<div class="card">Este acesso foi encerrado.</div><button class="sec" onclick="firebase.auth().signOut()">Sair</button>`; return; }
+  if (!doc) { app.innerHTML = `<div class="card">Seu acesso ainda está sendo preparado pela gestão. Tente de novo mais tarde.</div><button class="sec" onclick="fb.auth().signOut()">Sair</button>`; return; }
+  if (doc.ativo === false) { app.innerHTML = `<div class="card">Este acesso foi encerrado.</div><button class="sec" onclick="fb.auth().signOut()">Sair</button>`; return; }
   if (!doc.senhaTrocadaEm) return novaSenha();
   tela();
 }
@@ -89,6 +90,6 @@ function tela() {
     <div class="tabs">${[['resumo', 'Resumo'], ['consumo', 'Consumo'], ['ponto', 'Ponto'], ['dados', 'Meus dados']].map(([k, t]) => `<button data-t="${k}" class="${aba === k ? 'on' : ''}">${t}</button>`).join('')}</div>${body}
     <button class="sec" id="sair">Sair</button>`;
   document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { aba = b.dataset.t; tela(); });
-  $('#sair').onclick = () => firebase.auth().signOut();
+  $('#sair').onclick = () => fb.auth().signOut();
 }
 </script></body></html>
