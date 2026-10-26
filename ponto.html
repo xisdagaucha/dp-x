@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0e1310"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="ponto.webmanifest?v=1"><link rel="icon" href="icon-192.png?v=1"><link rel="apple-touch-icon" href="icon-192.png?v=1">
+<title>Ponto X · Xis da Gaúcha</title>
+<style>
+:root{--bg:#0e1310;--card:#171e1a;--card2:#1f2823;--ink:#f2f5f3;--mut:#93a199;--line:#2a352f;--acc:#25d366;--acc2:#1f8a4c;--bad:#ff5a5a;--warn:#ffb020}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;overscroll-behavior:none;user-select:none;-webkit-user-select:none}
+button,input{font:inherit;color:inherit}
+.wrap{min-height:100%;display:flex;flex-direction:column;padding:max(16px,env(safe-area-inset-top)) 20px max(16px,env(safe-area-inset-bottom))}
+.top{display:flex;align-items:center;gap:14px}
+.mark{width:46px;height:46px;border-radius:12px;background:#000;display:grid;place-items:center;flex:none;border:1px solid var(--line)}
+.mark svg{width:28px;height:28px}
+.brand b{display:block;font-size:20px;letter-spacing:.01em}.brand small{display:block;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut)}
+.grow{flex:1}
+.gear{width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:none;display:grid;place-items:center;cursor:pointer;color:var(--mut)}
+.gear svg{width:22px;height:22px}
+.clock{text-align:center;margin:18px 0 6px}
+.clock .h{font-size:clamp(56px,13vw,108px);font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+.clock .d{color:var(--mut);font-size:18px;margin-top:6px}
+.hint{text-align:center;color:var(--mut);margin:8px 0 18px;font-size:17px}
+.net{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--mut)}.net i{width:9px;height:9px;border-radius:50%;background:var(--acc);display:inline-block}.net.off i{background:var(--bad)}.net.off{color:var(--bad)}
+.sec{font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);margin:14px 2px 10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.p{border:1px solid var(--line);background:var(--card);border-radius:16px;padding:16px 12px;display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer;min-height:132px;justify-content:center;text-align:center;transition:transform .08s}
+.p:active{transform:scale(.97);background:var(--card2)}
+.av{width:58px;height:58px;border-radius:50%;background:#123d24;color:var(--acc);display:grid;place-items:center;font-weight:800;font-size:22px}
+.p b{font-size:18px;line-height:1.2}.p small{color:var(--mut);font-size:13px}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:20px;z-index:20}
+.box{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px;width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px;align-items:stretch}
+.box h2{margin:0;font-size:22px;text-align:center}
+.box p{margin:0;text-align:center;color:var(--mut)}
+.dots{display:flex;gap:14px;justify-content:center;margin:6px 0}
+.dots i{width:18px;height:18px;border-radius:50%;border:2px solid var(--mut)}.dots i.on{background:var(--acc);border-color:var(--acc)}
+.dots.err{animation:shake .35s}.dots.err i{border-color:var(--bad)}
+@keyframes shake{25%{transform:translateX(-10px)}50%{transform:translateX(10px)}75%{transform:translateX(-6px)}}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.pad button{height:68px;border-radius:14px;border:1px solid var(--line);background:var(--card2);font-size:28px;font-weight:700;cursor:pointer}
+.pad button:active{background:#2c3a32}
+.pad .sm{font-size:16px;font-weight:600;color:var(--mut)}
+.btn{border:1px solid var(--line);background:var(--card2);border-radius:12px;padding:14px 18px;font-weight:700;cursor:pointer;font-size:17px;text-align:center}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#05200f}
+.btn.ghost{background:none}
+.input{width:100%;border:1px solid var(--line);background:#0b0f0d;border-radius:12px;padding:14px;font-size:17px;user-select:text;-webkit-user-select:text}
+.input:focus{outline:2px solid var(--acc2)}
+label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--mut);font-weight:600}
+.err{color:var(--bad);text-align:center;font-size:15px;min-height:1em}
+.cam{position:relative;border-radius:18px;overflow:hidden;background:#000;aspect-ratio:3/4;width:100%;max-width:340px;align-self:center}
+.cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.cam .cd{position:absolute;inset:0;display:grid;place-items:center;font-size:96px;font-weight:800;color:#fff;text-shadow:0 4px 20px rgba(0,0,0,.6)}
+.cam .ring{position:absolute;inset:14% 18% 22%;border:3px dashed rgba(255,255,255,.55);border-radius:50%}
+.cam.flash::after{content:"";position:absolute;inset:0;background:#fff;animation:fl .35s forwards}@keyframes fl{to{opacity:0}}
+.ok{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
+.ok .ic{width:96px;height:96px;border-radius:50%;background:var(--acc);display:grid;place-items:center}
+.ok .ic svg{width:56px;height:56px}
+.ok .t{font-size:64px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+.ok .n{font-size:24px;font-weight:700}
+.warnb{background:#3a2a07;border:1px solid #6b4e0c;color:#ffd27a;border-radius:12px;padding:10px 12px;font-size:14px;text-align:center}
+.lojas{display:flex;flex-direction:column;gap:10px}
+.center{flex:1;display:flex;align-items:center;justify-content:center}
+.empty{color:var(--mut);text-align:center;padding:40px 10px}
+.demo{background:#25d366;color:#05200f;font-weight:700;text-align:center;font-size:13px;padding:4px;border-radius:8px;margin-bottom:10px}
+</style></head>
+<body><div id="app"></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<script>
+/* Ponto X · registro de ponto no tablet da loja (Xis da Gaúcha)
+   As batidas vão para o Firebase do DP X, com o horário do servidor e uma selfie. */
+const VERSAO = '1.0.0';
+const TABLET_EMAIL = 'tablet@ponto.xisdagaucha.com.br';
+const LOJAS = [{ id: 'barreiros', nome: 'Barreiros · São José' }, { id: 'palhoca', nome: 'Centro · Palhoça' }];
+const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const SEMANA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad2 = n => String(n).padStart(2, '0');
+const hhmm = t => { const d = new Date(t); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
+const iniciais = n => String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0].toUpperCase()).join('');
+const primeiro = n => String(n || '').trim().split(/\s+/)[0] || '';
+const LOGO = '<svg viewBox="0 0 24 24" fill="none" stroke="#25d366" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+const GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>';
+const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="#05200f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>';
+
+/* o mesmo cálculo é usado no DP X para gravar o PIN */
+async function hashPin(funcId, pin) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`xis-ponto:${funcId}:${pin}`));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const ls = { get(k, d = null) { try { const v = localStorage.getItem('pontox_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem('pontox_' + k, JSON.stringify(v)); } catch (e) { } } };
+function dispId() { let d = ls.get('disp'); if (!d) { d = 'tab-' + Math.random().toString(36).slice(2, 10); ls.set('disp', d); } return d; }
+
+const P = {
+  demo: !window.FIREBASE_CONFIG || /demo/.test(location.search + location.hash),
+  db: null, user: null, pessoas: [], offset: 0, unsub: null, overlay: null,
+  loja() { return ls.get('loja'); },
+  lojaNome(id) { return (LOJAS.find(l => l.id === id) || {}).nome || id || ''; },
+  agora() { return Date.now() + this.offset; },
+
+  async boot() {
+    this.root = $('#app');
+    if (this.demo) { this.user = { email: 'demonstração' }; this.pessoas = [['d1', 'Kelli Souza', 'barreiros'], ['d2', 'Weslen Lima', 'barreiros'], ['d3', 'Denize Rosa', 'barreiros'], ['d4', 'Leonardo Alves', 'barreiros'], ['d5', 'Emily Martins', 'palhoca'], ['d6', 'Robson Costa', 'palhoca']].map(([id, nome, loja]) => ({ id, nome, loja, hash: '' })); if (!this.loja()) ls.set('loja', 'barreiros'); return this.main(); }
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    this.db = firebase.firestore();
+    firebase.auth().onAuthStateChanged(u => {
+      this.user = u;
+      if (!u || u.email !== TABLET_EMAIL) { if (u) firebase.auth().signOut(); return this.setup(); }
+      if (!this.loja()) return this.escolherLoja();
+      this.main();
+    });
+    addEventListener('online', () => this.rede()); addEventListener('offline', () => this.rede());
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.manterTela(); });
+  },
+
+  /* ---------- configuração inicial do tablet ---------- */
+  setup() {
+    this.root.innerHTML = `<div class="wrap"><div class="top"><span class="mark">${LOGO}</span><span class="brand"><b>Ponto X</b><small>Xis da Gaúcha</small></span></div>
+      <div class="center"><div class="box"><h2>Ligar este tablet</h2><p>Use a senha do tablet que foi criada no DP X, em Configurações → Ponto no tablet.</p>
+      <label class="f">Senha do tablet<input class="input" id="s-pw" type="password" autocomplete="current-password"></label>
+      <div class="err" id="s-err"></div><button class="btn pri" id="s-ok">Entrar</button></div></div></div>`;
+    const go = async () => {
+      $('#s-err').textContent = ''; $('#s-ok').disabled = true;
+      try { await firebase.auth().signInWithEmailAndPassword(TABLET_EMAIL, $('#s-pw').value); }
+      catch (e) { $('#s-ok').disabled = false; $('#s-err').textContent = /password|credential|not-found|invalid/i.test(e.code || '') ? 'Senha incorreta.' : 'Não consegui entrar: ' + (e.code || e.message); }
+    };
+    $('#s-ok').onclick = go; $('#s-pw').onkeydown = e => { if (e.key === 'Enter') go(); };
+    setTimeout(() => $('#s-pw').focus(), 50);
+  },
+  escolherLoja() {
+    this.fecharOv();
+    this.root.innerHTML = `<div class="wrap"><div class="top"><span class="mark">${LOGO}</span><span class="brand"><b>Ponto X</b><small>Xis da Gaúcha</small></span></div>
+      <div class="center"><div class="box"><h2>Este tablet fica em qual loja?</h2><p>As batidas feitas aqui ficam marcadas com essa loja.</p>
+      <div class="lojas">${LOJAS.map(l => `<button class="btn" data-l="${l.id}">${esc(l.nome)}</button>`).join('')}</div></div></div></div>`;
+    $$('[data-l]').forEach(b => b.onclick = () => { ls.set('loja', b.dataset.l); this.main(); });
+  },
+
+  /* ---------- tela principal ---------- */
+  main() {
+    this.root.innerHTML = `<div class="wrap">${this.demo ? '<div class="demo">DEMONSTRAÇÃO · nada é gravado</div>' : ''}
+      <div class="top"><span class="mark">${LOGO}</span><span class="brand grow"><b>Ponto X</b><small>${esc(this.lojaNome(this.loja()))}</small></span><span class="net" id="net"><i></i><span>online</span></span><button class="gear" id="gear" aria-label="Configurar">${GEAR}</button></div>
+      <div class="clock"><div class="h" id="hora">--:--</div><div class="d" id="data"></div></div>
+      <div class="hint">Toque no seu nome para registrar o ponto</div>
+      <div id="lista"><div class="empty">Carregando a equipe…</div></div></div>`;
+    $('#gear').onclick = () => this.config();
+    clearInterval(this._clk); this._clk = setInterval(() => this.relogio(), 1000); this.relogio();
+    this.rede(); this.manterTela();
+    if (this.demo) return this.lista();
+    if (this.unsub) this.unsub();
+    this.unsub = this.db.collection('pontoPin').where('ativo', '==', true).onSnapshot(s => {
+      this.pessoas = []; s.forEach(d => this.pessoas.push(Object.assign({ id: d.id }, d.data()))); this.lista();
+    }, e => { $('#lista').innerHTML = `<div class="empty">Sem acesso à lista da equipe.<br><small>${esc(e.code || e.message)}</small><br><br>Confira se as regras de segurança do DP X foram publicadas no Firebase.</div>`; });
+    this.sinal(); clearInterval(this._sin); this._sin = setInterval(() => this.sinal(), 5 * 60 * 1000);
+  },
+  lista() {
+    const el = $('#lista'); if (!el) return;
+    const aqui = this.loja(), ord = (a, b) => a.nome.localeCompare(b.nome);
+    const daqui = this.pessoas.filter(p => p.loja === aqui).sort(ord), outros = this.pessoas.filter(p => p.loja !== aqui).sort(ord);
+    const card = p => `<button class="p" data-p="${esc(p.id)}"><span class="av">${esc(iniciais(p.nome))}</span><b>${esc(p.apelido || primeiro(p.nome))}</b><small>${esc(p.nome.split(/\s+/).slice(1, 3).join(' '))}</small></button>`;
+    el.innerHTML = !this.pessoas.length ? '<div class="empty">Ninguém com PIN cadastrado ainda.<br>Defina o PIN de cada um na ficha, no DP X.</div>'
+      : `<div class="grid">${daqui.map(card).join('')}</div>${outros.length ? `<div class="sec">Da outra loja</div><div class="grid">${outros.map(card).join('')}</div>` : ''}`;
+    $$('[data-p]', el).forEach(b => b.onclick = () => this.pin(this.pessoas.find(p => p.id === b.dataset.p)));
+  },
+  relogio() {
+    const d = new Date(this.agora()), h = $('#hora'), dt = $('#data'); if (!h) return;
+    h.textContent = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    const sem = SEMANA[d.getDay()]; dt.textContent = `${sem[0].toUpperCase() + sem.slice(1)}, ${d.getDate()} de ${MESES[d.getMonth()]}`;
+  },
+  rede() { const n = $('#net'); if (!n) return; const on = navigator.onLine; n.classList.toggle('off', !on); n.lastElementChild.textContent = on ? 'online' : 'sem internet'; },
+  async manterTela() { try { if ('wakeLock' in navigator && document.visibilityState === 'visible') this._wl = await navigator.wakeLock.request('screen'); } catch (e) { } },
+  /* avisa o DP X que este tablet está ligado e acerta o relógio pelo do servidor */
+  async sinal() {
+    if (this.demo) return;
+    try {
+      const ref = this.db.collection('tablets').doc(dispId()), t0 = Date.now();
+      await ref.set({ loja: this.loja(), visto: firebase.firestore.FieldValue.serverTimestamp(), versao: VERSAO, agent: navigator.userAgent.slice(0, 160) });
+      const s = await ref.get({ source: 'server' }), t1 = Date.now(), v = s.get('visto');
+      if (v && v.toMillis) this.offset = v.toMillis() - (t0 + t1) / 2;
+    } catch (e) { }
+  },
+
+  /* ---------- janelas ---------- */
+  ov(html, { fechar = true, tempo = 25000 } = {}) {
+    this.fecharOv();
+    const o = document.createElement('div'); o.className = 'ov'; o.innerHTML = `<div class="box">${html}</div>`;
+    document.body.appendChild(o); this.overlay = o;
+    if (fechar) o.addEventListener('click', e => { if (e.target === o) this.fecharOv(); });
+    const reset = () => { clearTimeout(this._idle); if (tempo) this._idle = setTimeout(() => this.fecharOv(), tempo); };
+    o.addEventListener('pointerdown', reset); reset();
+    return o;
+  },
+  fecharOv() { clearTimeout(this._idle); this.pararCamera(); if (this.overlay) { this.overlay.remove(); this.overlay = null; } },
+
+  /* ---------- PIN ---------- */
+  pin(p) {
+    if (!p) return;
+    const trava = ls.get('trava_' + p.id, 0);
+    if (trava > Date.now()) { this.ov(`<h2>${esc(primeiro(p.nome))}</h2><p>PIN errado várias vezes. Tente de novo em ${Math.ceil((trava - Date.now()) / 1000)} segundos ou chame a gerência.</p><button class="btn" data-c>Ok</button>`); $('[data-c]', this.overlay).onclick = () => this.fecharOv(); return; }
+    let dig = '';
+    const o = this.ov(`<h2>Olá, ${esc(primeiro(p.nome))}!</h2><p>Digite o seu PIN</p><div class="dots" id="dots">${'<i></i>'.repeat(4)}</div>
+      <div class="pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-n="${n}">${n}</button>`).join('')}<button class="sm" data-c>Cancelar</button><button data-n="0">0</button><button class="sm" data-b>Apagar</button></div>`);
+    const dots = () => $$('#dots i', o).forEach((d, i) => d.classList.toggle('on', i < dig.length));
+    const errou = () => {
+      const n = ls.get('erros_' + p.id, 0) + 1; ls.set('erros_' + p.id, n);
+      if (n >= 3) { ls.set('trava_' + p.id, Date.now() + 60000); ls.set('erros_' + p.id, 0); this.fecharOv(); return this.pin(p); }
+      const el = $('#dots', o); el.classList.add('err'); setTimeout(() => { el.classList.remove('err'); dig = ''; dots(); }, 400);
+    };
+    $$('[data-n]', o).forEach(b => b.onclick = async () => {
+      if (dig.length >= 4) return; dig += b.dataset.n; dots();
+      if (dig.length === 4) {
+        const ok = this.demo ? true : (await hashPin(p.id, dig)) === p.hash;
+        if (!ok) return errou();
+        ls.set('erros_' + p.id, 0); this.confirmarRepetida(p);
+      }
+    });
+    $('[data-b]', o).onclick = () => { dig = dig.slice(0, -1); dots(); };
+    $('[data-c]', o).onclick = () => this.fecharOv();
+  },
+  /* evita bater duas vezes sem querer */
+  confirmarRepetida(p) {
+    const ult = ls.get('ult_' + p.id, 0);
+    if (ult && this.agora() - ult < 3 * 60 * 1000) {
+      const o = this.ov(`<h2>Já registrado</h2><p>${esc(primeiro(p.nome))}, você registrou o ponto às <b>${hhmm(ult)}</b>. Quer registrar de novo?</p><button class="btn pri" data-s>Registrar de novo</button><button class="btn ghost" data-c>Não, foi engano</button>`);
+      $('[data-s]', o).onclick = () => this.camera(p); $('[data-c]', o).onclick = () => this.fecharOv();
+      return;
+    }
+    this.camera(p);
+  },
+
+  /* ---------- selfie ---------- */
+  async camera(p) {
+    const o = this.ov(`<h2>Olhe para a câmera</h2><div class="cam" id="cam"><video id="vid" playsinline muted autoplay></video><span class="ring"></span><span class="cd" id="cd"></span></div><p>A foto sai sozinha</p>`, { fechar: false, tempo: 30000 });
+    let foto = null;
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      const v = $('#vid', o); v.srcObject = this.stream; await v.play();
+      await new Promise(r => setTimeout(r, 400));
+      for (const n of [3, 2, 1]) { if (!this.overlay) return; $('#cd', o).textContent = n; await new Promise(r => setTimeout(r, 800)); }
+      $('#cd', o).textContent = ''; $('#cam', o).classList.add('flash');
+      foto = this.capturar(v);
+    } catch (e) {
+      if (!this.overlay) return;
+      const o2 = this.ov(`<h2>Câmera indisponível</h2><div class="warnb">Não consegui abrir a câmera do tablet. O ponto pode ser registrado sem foto, mas fica marcado para a gerência conferir.</div><button class="btn pri" data-s>Registrar sem foto</button><button class="btn ghost" data-c>Cancelar</button>`, { fechar: false });
+      $('[data-s]', o2).onclick = () => this.registrar(p, null); $('[data-c]', o2).onclick = () => this.fecharOv();
+      return;
+    }
+    this.pararCamera();
+    this.registrar(p, foto);
+  },
+  capturar(v) {
+    const w = 240, h = 320, c = document.createElement('canvas'); c.width = w; c.height = h;
+    const vw = v.videoWidth, vh = v.videoHeight, alvo = w / h; let sw = vw, sh = vh, sx = 0, sy = 0;
+    if (vw / vh > alvo) { sw = vh * alvo; sx = (vw - sw) / 2; } else { sh = vw / alvo; sy = (vh - sh) / 2; }
+    const g = c.getContext('2d'); g.translate(w, 0); g.scale(-1, 1); g.drawImage(v, sx, sy, sw, sh, 0, 0, w, h);
+    return c.toDataURL('image/jpeg', 0.62);
+  },
+  pararCamera() { if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; } },
+
+  /* ---------- grava a batida ---------- */
+  async registrar(p, foto) {
+    const o = this.ov(`<h2>Registrando…</h2><p>Só um instante</p>`, { fechar: false, tempo: 0 });
+    const local = this.agora(); let atrasou = false;
+    if (!this.demo) {
+      const ref = this.db.collection('batidas').doc(), ts = firebase.firestore.FieldValue.serverTimestamp(), b = this.db.batch();
+      b.set(ref, { funcId: p.id, nome: p.nome, loja: this.loja(), at: ts, atLocal: Date.now(), disp: dispId(), origem: 'tablet', foto: !!foto, v: VERSAO });
+      if (foto) b.set(this.db.collection('batidaFotos').doc(ref.id), { funcId: p.id, at: ts, img: foto });
+      const ok = await Promise.race([b.commit().then(() => true, e => { this._erro = e; return false; }), new Promise(r => setTimeout(() => r('lento'), 10000))]);
+      if (ok === false) {
+        const e = this._erro || {}, o2 = this.ov(`<h2>Não consegui registrar</h2><div class="warnb">${/permission/i.test(e.code || '') ? 'O Firebase recusou a batida. Avise a gerência para conferir o PIN e as regras de segurança.' : 'Erro: ' + esc(e.code || e.message || '')}</div><button class="btn pri" data-s>Tentar de novo</button><button class="btn ghost" data-c>Fechar</button>`, { fechar: false });
+        $('[data-s]', o2).onclick = () => this.registrar(p, foto); $('[data-c]', o2).onclick = () => this.fecharOv();
+        return;
+      }
+      atrasou = ok === 'lento';
+    }
+    ls.set('ult_' + p.id, local);
+    this.ov(`<div class="ok"><span class="ic">${CHECK}</span><div class="t">${hhmm(local)}</div><div class="n">${esc(primeiro(p.nome))}, ponto registrado!</div><p>${esc(this.lojaNome(this.loja()))}</p>
+      ${atrasou ? '<div class="warnb">A internet está lenta. O ponto vai ser enviado assim que a conexão voltar — mantenha o tablet ligado e avise a gerência.</div>' : ''}
+      ${!foto ? '<div class="warnb">Registrado sem foto.</div>' : ''}</div>`, { tempo: atrasou ? 9000 : 3500 });
+  },
+
+  /* ---------- configurar (pede a senha do tablet) ---------- */
+  config() {
+    const o = this.ov(`<h2>Configurar tablet</h2><p>Digite a senha do tablet para continuar.</p><label class="f">Senha do tablet<input class="input" id="c-pw" type="password"></label><div class="err" id="c-err"></div><button class="btn pri" data-s>Continuar</button><button class="btn ghost" data-c>Cancelar</button>`);
+    $('[data-c]', o).onclick = () => this.fecharOv();
+    $('[data-s]', o).onclick = async () => {
+      if (!this.demo) {
+        try { await firebase.auth().currentUser.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(TABLET_EMAIL, $('#c-pw', o).value)); }
+        catch (e) { $('#c-err', o).textContent = 'Senha incorreta.'; return; }
+      }
+      const o2 = this.ov(`<h2>Configurar tablet</h2><p>Loja atual: <b>${esc(this.lojaNome(this.loja()))}</b><br><small>Versão ${VERSAO} · ${esc(dispId())}</small></p>
+        <button class="btn" data-l>Trocar a loja</button><button class="btn" data-r>Recarregar o app</button>${this.demo ? '' : '<button class="btn" data-o>Desligar este tablet</button>'}<button class="btn ghost" data-c>Fechar</button>`);
+      $('[data-l]', o2).onclick = () => { if (this.unsub) this.unsub(); this.escolherLoja(); };
+      $('[data-r]', o2).onclick = () => location.reload();
+      const out = $('[data-o]', o2); if (out) out.onclick = async () => { await firebase.auth().signOut(); ls.set('loja', null); location.reload(); };
+      $('[data-c]', o2).onclick = () => this.fecharOv();
+    };
+  }
+};
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+P.boot();
+</script></body></html>
