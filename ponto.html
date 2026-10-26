@@ -71,7 +71,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--mu
 <script>
 /* Ponto X · registro de ponto no tablet da loja (Xis da Gaúcha)
    As batidas vão para o Firebase do DP X, com o horário do servidor e uma selfie. */
-const VERSAO = '1.0.0';
+const VERSAO = '1.1.0';
 const TABLET_EMAIL = 'tablet@ponto.xisdagaucha.com.br';
 const LOJAS = [{ id: 'barreiros', nome: 'Barreiros · São José' }, { id: 'palhoca', nome: 'Centro · Palhoça' }];
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
@@ -161,7 +161,7 @@ const P = {
     const aqui = this.loja(), ord = (a, b) => a.nome.localeCompare(b.nome);
     const daqui = this.pessoas.filter(p => p.loja === aqui).sort(ord), outros = this.pessoas.filter(p => p.loja !== aqui).sort(ord);
     const card = p => `<button class="p" data-p="${esc(p.id)}"><span class="av">${esc(iniciais(p.nome))}</span><b>${esc(p.apelido || primeiro(p.nome))}</b><small>${esc(p.nome.split(/\s+/).slice(1, 3).join(' '))}</small></button>`;
-    el.innerHTML = !this.pessoas.length ? '<div class="empty">Ninguém com PIN cadastrado ainda.<br>Defina o PIN de cada um na ficha, no DP X.</div>'
+    el.innerHTML = !this.pessoas.length ? '<div class="empty">Ninguém liberado no tablet ainda.<br>No DP X: gere os PINs em Ponto do mês, ou desligue o PIN em Configurações → Ponto no tablet.</div>'
       : `<div class="grid">${daqui.map(card).join('')}</div>${outros.length ? `<div class="sec">Da outra loja</div><div class="grid">${outros.map(card).join('')}</div>` : ''}`;
     $$('[data-p]', el).forEach(b => b.onclick = () => this.pin(this.pessoas.find(p => p.id === b.dataset.p)));
   },
@@ -198,6 +198,14 @@ const P = {
   /* ---------- PIN ---------- */
   pin(p) {
     if (!p) return;
+    /* PIN desligado no DP X: vai direto para a selfie (com confirmação do nome) */
+    if (p.pedirPin === false) {
+      if (this.demo) return this.confirmarRepetida(p);
+      const o = this.ov(`<h2>Você é ${esc(primeiro(p.nome))}?</h2><p>${esc(p.nome)}</p><button class="btn pri" data-s>Sim, registrar o ponto</button><button class="btn ghost" data-c>Não, voltar</button>`);
+      $('[data-s]', o).onclick = () => this.confirmarRepetida(p); $('[data-c]', o).onclick = () => this.fecharOv();
+      return;
+    }
+    if (!p.hash && !this.demo) { const o = this.ov(`<h2>${esc(primeiro(p.nome))}</h2><p>Você ainda não tem PIN. Peça para a gerência criar no DP X.</p><button class="btn" data-c>Ok</button>`); $('[data-c]', o).onclick = () => this.fecharOv(); return; }
     const trava = ls.get('trava_' + p.id, 0);
     if (trava > Date.now()) { this.ov(`<h2>${esc(primeiro(p.nome))}</h2><p>PIN errado várias vezes. Tente de novo em ${Math.ceil((trava - Date.now()) / 1000)} segundos ou chame a gerência.</p><button class="btn" data-c>Ok</button>`); $('[data-c]', this.overlay).onclick = () => this.fecharOv(); return; }
     let dig = '';

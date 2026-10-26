@@ -75,7 +75,8 @@ function novaSenha() {
   };
 }
 function tela() {
-  const c = (doc.consumo || []), atual = c[0], ant = c[1], v = doc.voucher, p = (doc.ponto || [])[0];
+  const c = (doc.consumo || []), atual = c[0], ant = c[1], v = doc.voucher, p = doc.mostrarPonto === false ? null : (doc.ponto || [])[0];
+  if (aba === 'ponto' && doc.mostrarPonto === false) aba = 'resumo';
   const itens = l => (l || []).map(x => `<div class="row"><span><span class="mut small">${dt(x.at)}</span> ${esc(x.desc)}${x.voucher ? `<br><span class="small mut">voucher ${brl(x.voucher)}</span>` : ''}</span><span style="text-align:right;white-space:nowrap"><b>${brl(x.adiant ? x.total : x.aDescontar || x.total)}</b><br>${x.sit ? `<span class="pill ${x.sit === 'a descontar' ? 'warn' : 'ok'}">${esc(x.sit)}</span>` : ''}</span></div>`).join('') || '<p class="mut small" style="margin:0">Nada lançado.</p>';
   let body = '';
   if (aba === 'resumo') body = `
@@ -87,7 +88,7 @@ function tela() {
   if (aba === 'dados') body = `<div class="card"><h2>Meus dados</h2><div class="row"><span>Cargo</span><b>${esc(doc.cargo)}</b></div><div class="row"><span>Loja</span><b>${esc(doc.loja)}</b></div><div class="row"><span>Entrada</span><b>${dataBr(doc.admissao)}</b></div><div class="row"><span>Tempo de casa</span><b>${esc(doc.tempo)}</b></div>${doc.contrato ? `<div class="row"><span>Contrato</span><b>${esc(doc.contrato)}</b></div>` : ''}${doc.aniversario ? `<div class="row"><span>Aniversário</span><b>${esc(doc.aniversario)}</b></div>` : ''}</div>
     <div class="card"><h2>Uniformes comigo</h2>${(doc.uniformes || []).map(u => `<div class="row"><span>${esc(u)}</span></div>`).join('') || '<p class="mut small" style="margin:0">Nenhum.</p>'}</div>`;
   app.innerHTML = `<div class="card" style="padding:12px 16px"><b>Olá, ${esc(doc.nome.split(' ')[0])}!</b><br><span class="small mut">Atualizado em ${new Date(doc.atualizado || Date.now()).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></div>
-    <div class="tabs">${[['resumo', 'Resumo'], ['consumo', 'Consumo'], ['ponto', 'Ponto'], ['dados', 'Meus dados']].map(([k, t]) => `<button data-t="${k}" class="${aba === k ? 'on' : ''}">${t}</button>`).join('')}</div>${body}
+    <div class="tabs">${[['resumo', 'Resumo'], ['consumo', 'Consumo'], ['ponto', 'Ponto'], ['dados', 'Meus dados']].filter(([k]) => k !== 'ponto' || doc.mostrarPonto !== false).map(([k, t]) => `<button data-t="${k}" class="${aba === k ? 'on' : ''}">${t}</button>`).join('')}</div>${body}
     <button class="sec" id="sair">Sair</button>`;
   document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { aba = b.dataset.t; tela(); });
   $('#sair').onclick = () => fb.auth().signOut();
