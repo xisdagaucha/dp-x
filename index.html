@@ -97,7 +97,7 @@ a.btn{color:var(--ink);text-decoration:none}
 .pv-ov{position:fixed;inset:0;z-index:80;background:#e9ece9;display:flex;flex-direction:column}.pv-bar{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#121614;color:#fff}.pv-bar .btn:not(.primary){color:var(--ink)}.pv-fr{flex:1;border:0;width:100%;background:#e9ece9}
 </style></head>
 <body><div id="app"></div><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script><script src="config.js"></script><script>/* DP X · Departamento pessoal do Xis da Gaúcha — núcleo */
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.11.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -182,7 +182,12 @@ const DEFAULT_CFG = {
   },
   origens: ['Indicação', 'WhatsApp Administrativo', 'Instagram', 'Placa na loja', 'Site de vagas', 'Outro'],
   pagamentos: true,
-  pontoJornada: '7:20', pontoIntervalo: 60, pontoTolerancia: 10, pontoVirada: 5, pontoPedirPin: false, pontoDomHorario: '18:00 às 00:45', pontoDomIntervalo: 15, pontoBloquearAntes: true, pontoAntecedencia: 5, pontoAtraso: 5, portalPonto: true, gestores: [],
+  pontoJornada: '7:20', pontoIntervalo: 60, pontoTolerancia: 10, pontoVirada: 5, pontoPedirPin: false, turnos: [
+    { id: 'manha', nome: 'Manhã', horario: '09:00 às 17:20', intervalo: 60 },
+    { id: 'manha1010', nome: 'Manhã 10:10', horario: '10:10 às 17:30', intervalo: 60 },
+    { id: 'noite', nome: 'Noite', horario: '17:05 às 01:00', intervalo: 60 }
+  ],
+  pontoDomHorario: '18:00 às 00:45', pontoDomIntervalo: 15, pontoBloquearAntes: true, pontoAntecedencia: 5, pontoAtraso: 5, portalPonto: true, gestores: [],
   createdAt: 0
 };
 const Store = {
@@ -827,7 +832,7 @@ const Bat = {
     }
     return Math.round(hm(Store.cfg().pontoJornada || '7:20') * 60);
   },
-  intervalo(f, dia) { if (ehDomingo(dia)) return this.cfgN('pontoDomIntervalo', 15); return f && f.intervaloPonto !== '' && f.intervaloPonto != null && !isNaN(+f.intervaloPonto) ? +f.intervaloPonto : this.cfgN('pontoIntervalo', 60); },
+  intervalo(f, dia) { if (ehDomingo(dia)) return this.cfgN('pontoDomIntervalo', 15); const t = turnoDe(f); if (t && t.intervalo !== '' && t.intervalo != null) return +t.intervalo; return f && f.intervaloPonto !== '' && f.intervaloPonto != null && !isNaN(+f.intervaloPonto) ? +f.intervaloPonto : this.cfgN('pontoIntervalo', 60); },
   /* a batida da madrugada conta para o dia anterior (turno da noite até 01:00) */
   dia(at) { return D.str(new Date(at - this.virada() * 3600e3)); },
   faixa(mes) { const [y, m] = mes.split('-').map(Number), v = this.virada(); return [new Date(y, m - 1, 1, v), new Date(y, m, 1, v)]; },
@@ -941,7 +946,7 @@ function sincronizarPins() {
       if (Object.keys(alvo).some(k => cur[k] !== alvo[k])) await Store.put('pontoPin', Object.assign({ id: '_empresa' }, alvo)).catch(() => {}); }
     for (const p of Store.all('pontoPin').filter(x => !String(x.id).startsWith('_'))) {
       const c = Store.cfg(), antes = c.pontoBloquearAntes === false ? null : Math.max(0, +c.pontoAntecedencia || 0), atr = Bat.atrasoMin();
-      const f = Func.get(p.id), alvo = f ? { nome: f.nome, loja: f.loja, ativo: f.status !== 'desligado', pedirPin: pedir, inicio: hIni(f.horario), fim: hFim(f.horario), inicioDom: hIni(horarioDo(f, '2026-11-01')), fimDom: hFim(horarioDo(f, '2026-11-01')), intervalo: Bat.intervalo(f), intervaloDom: Bat.intervalo(f, '2026-11-01'), antes, atraso: atr } : { ativo: false, pedirPin: pedir };
+      const f = Func.get(p.id), alvo = f ? { nome: f.nome, loja: f.loja, ativo: f.status !== 'desligado', pedirPin: pedir, inicio: hIni(horarioBase(f)), fim: hFim(horarioBase(f)), inicioDom: hIni(horarioDo(f, '2026-11-01')), fimDom: hFim(horarioDo(f, '2026-11-01')), intervalo: Bat.intervalo(f), intervaloDom: Bat.intervalo(f, '2026-11-01'), antes, atraso: atr } : { ativo: false, pedirPin: pedir };
       if (Object.keys(alvo).some(k => p[k] !== alvo[k])) await Store.put('pontoPin', Object.assign({}, p, alvo)).catch(() => {});
     }
   }, 1500);
@@ -987,7 +992,7 @@ function vBatidas(pg) {
   const at = Func.ativos().filter(f => !S.loja || f.loja === S.loja), comPin = Func.ativos().filter(f => Bat.noTablet(f.id)).length;
   const head = `<div class="head"><div class="grow"><h1>Ponto do mês</h1><div class="sub">Batidas do tablet viram horas trabalhadas, extras e faltantes. Confira, ajuste e leve para o resumo do mês.</div></div>
     <select class="input" id="bt-mes" style="width:auto">${mesesPonto().map(m => `<option value="${m}" ${m === mes ? 'selected' : ''}>${Ponto.mesTxt(m)}</option>`).join('')}</select>
-    <button class="btn" id="bt-rf">${ico('refresh')} Atualizar</button><button class="btn" id="bt-ro">${ico('user')} Rostos</button><button class="btn" id="bt-rc">${ico('file')} Relatório para a contabilidade</button>${Bat.pedirPin() ? `<button class="btn" id="bt-pin">${ico('user')} PINs</button>` : ''}</div>${pontoTabs()}`;
+    <button class="btn" id="bt-rf">${ico('refresh')} Atualizar</button><button class="btn" id="bt-ro">${ico('user')} Rostos</button><button class="btn" id="bt-he">${ico('clock')} Turnos</button><button class="btn" id="bt-rc">${ico('file')} Relatório para a contabilidade</button>${Bat.pedirPin() ? `<button class="btn" id="bt-pin">${ico('user')} PINs</button>` : ''}</div>${pontoTabs()}`;
   if (!c) {
     pg.innerHTML = head + '<div class="empty">Buscando as batidas…</div>'; ligarBat(pg, mes);
     Bat.carregar(mes).then(() => { if (S.view === 'ponto' && (S.pTab || 'bat') === 'bat') App.render(); }).catch(e => { pg.innerHTML = head + `<div class="alert bad">Não consegui buscar as batidas: ${esc(e.code || e.message)}<br><span class="small">Confira se as regras de segurança foram publicadas (Configurações → Segurança do Firebase).</span></div>`; ligarBat(pg, mes); });
@@ -1030,6 +1035,7 @@ function ligarBat(pg, mes) {
   $('#bt-mes', pg).onchange = e => { S.batMes = e.target.value; App.render(); };
   $('#bt-rf', pg).onclick = () => { delete Bat.cache[mes]; App.render(); };
   $('#bt-ro', pg).onclick = () => listaRostos();
+  $('#bt-he', pg).onclick = () => horariosEquipe();
   $('#bt-rc', pg).onclick = () => relatorioContabil(mes);
   const bp = $('#bt-pin', pg); if (bp) bp.onclick = () => gerarPins();
 }
@@ -1119,7 +1125,7 @@ async function imprimirEspelhos(fs, mes, faixa, soPaginas) {
     const r = Bat.calc(f, list, null, [de, ate]);
     if (!r.tot.dias) return '';
     return `<div class="pg">${cabEmpresa()}<h1>Espelho de ponto · ${per}</h1>
-      <div class="fg">${cel('Funcionário', f.nome, 3)}${cel('CPF', f.cpf, 1)}${cel('Cargo', f.cargo, 1)}${cel('Admissão', D.fmt(f.admissao), 1)}${cel('Horário (ter. a sáb.)', f.horario, 2)}${cel('Domingo', horarioDo(f, '2026-11-01') + ' · ' + Bat.intervalo(f, '2026-11-01') + ' min de intervalo', 2)}${cel('Jornada / intervalo', minH(Bat.jornada(f)) + ' · ' + Bat.intervalo(f) + ' min', 2)}</div>
+      <div class="fg">${cel('Funcionário', f.nome, 3)}${cel('CPF', f.cpf, 1)}${cel('Cargo', f.cargo, 1)}${cel('Admissão', D.fmt(f.admissao), 1)}${cel('Horário (ter. a sáb.)', horarioBase(f), 2)}${cel('Domingo', horarioDo(f, '2026-11-01') + ' · ' + Bat.intervalo(f, '2026-11-01') + ' min de intervalo', 2)}${cel('Jornada / intervalo', minH(Bat.jornada(f)) + ' · ' + Bat.intervalo(f) + ' min', 2)}</div>
       <table style="font-size:10.5px"><thead><tr><th>Dia</th><th>Marcações</th><th>Intervalo</th><th>Trabalhadas</th><th>Extras</th><th>Faltantes</th><th>Obs.</th></tr></thead><tbody>
       ${r.dias.map(d => `<tr><td>${D.curto(d.dia)} ${D.semana(d.dia).slice(0, 3)}</td><td>${marcTxt(d) || (d.semReg ? 'sem registro' : '–')}</td><td>${d.intv ? minH(d.intv) : d.itv ? minH(d.itv) + '¹' : ''}</td><td>${d.validas.length && !d.pend ? minH(d.trab) : ''}</td><td>${d.saldo > 0 ? minH(d.saldo) : ''}</td><td>${d.saldo < 0 ? minH(-d.saldo) : ''}</td><td>${[d.atraso ? 'atraso de ' + d.atraso + ' min' : '', d.pend ? 'marcação incompleta' : '', !d.pend && d.not ? 'inclui ' + d.not + ' min de redução noturna' : ''].filter(Boolean).join('; ')}</td></tr>`).join('')}
       <tr><th colspan="2">Total</th><th>${minH(r.tot.intv)}</th><th>${minH(r.tot.trab)}</th><th>${minH(r.tot.extras)}</th><th>${minH(r.tot.faltantes)}</th><th>${r.tot.atrasos ? r.tot.atrasos + ' atraso(s)' : ''}</th></tr></tbody></table>
@@ -1129,6 +1135,21 @@ async function imprimirEspelhos(fs, mes, faixa, soPaginas) {
   }).filter(Boolean);
   if (soPaginas) return pags;
   imprimir('Espelho de ponto ' + per, pags);
+}
+
+/* escolher o turno de cada funcionário de uma vez */
+function horariosEquipe() {
+  const desenhar = () => {
+    const ts = Store.cfg().turnos || [], fs = Func.ativos();
+    m.el.querySelector('.mb').innerHTML = `<p style="margin:0">O turno define o horário de entrada (para o bloqueio e o atraso), a saída e o intervalo. Domingo é igual para todos (${esc(Store.cfg().pontoDomHorario || '')}). Os turnos são editados em Configurações → Ponto no tablet.</p>
+      <table class="table"><thead><tr><th>Funcionário</th><th>Turno</th><th>Horário</th></tr></thead><tbody>${fs.map(f => `<tr><td><b>${esc(f.nome)}</b><br><span class="muted small">${esc(f.cargo || '')}</span></td>
+        <td><select class="input" data-ht="${f.id}" style="min-width:190px"><option value="">Personalizado</option>${ts.map(t => `<option value="${t.id}" ${f.turno === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></td>
+        <td>${turnoDe(f) ? `<span class="num">${esc(turnoDe(f).horario)}</span> <span class="muted small">· ${turnoDe(f).intervalo} min</span>` : `<input class="input" data-hh="${f.id}" value="${esc(f.horario || '')}" placeholder="Ex.: 10:10 às 17:30" style="max-width:170px">`}</td></tr>`).join('')}</tbody></table>`;
+    $$('[data-ht]', m.el).forEach(sel => sel.onchange = async () => { const f = Func.get(sel.dataset.ht), t = ts.find(x => x.id === sel.value); await Store.put('funcionarios', Object.assign({}, f, { turno: sel.value, horario: t ? t.horario : f.horario })); toast('Turno salvo'); desenhar(); });
+    $$('[data-hh]', m.el).forEach(i => i.onchange = async () => { const f = Func.get(i.dataset.hh); await Store.put('funcionarios', Object.assign({}, f, { horario: i.value.trim() })); toast('Horário salvo'); });
+  };
+  const m = modal({ title: 'Turno de cada funcionário', wide: true, body: '', foot: '<button class="btn primary" data-x>Pronto</button>', onClose: () => App.render() });
+  desenhar();
 }
 
 /* relatório para a contabilidade: período e funcionários à escolha */
@@ -1344,7 +1365,9 @@ function listaRostos() {
 const hIni = t => { const m = String(t || '').match(/(\d{1,2})[:h](\d{2})/); return m ? pad2(+m[1]) + ':' + m[2] : ''; };
 const hFim = t => { const m = String(t || '').match(/\d{1,2}[:h]\d{2}/g); return m && m.length > 1 ? hIni(m[m.length - 1]) : ''; };
 const ehDomingo = dia => !!dia && D.parse(dia).getDay() === 0;
-function horarioDo(f, dia) { return String((ehDomingo(dia) ? (f.horarioDom || Store.cfg().pontoDomHorario) : f.horario) || ''); }
+const turnoDe = f => f && f.turno ? (Store.cfg().turnos || []).find(t => t.id === f.turno) || null : null;
+function horarioBase(f) { const t = turnoDe(f); return String((t ? t.horario : f && f.horario) || ''); }
+function horarioDo(f, dia) { return String((ehDomingo(dia) ? (f.horarioDom || Store.cfg().pontoDomHorario) : horarioBase(f)) || ''); }
 function horaIni(f, dia) { return hIni(horarioDo(f || {}, dia)); }
 function horaFim(f, dia) { return hFim(horarioDo(f || {}, dia)); }
 /* minutos de atraso da primeira batida do dia (null se não chegou atrasado) */
@@ -1352,7 +1375,9 @@ function atrasoDe(f, dia, primeira) {
   const ini = horaIni(f, dia); if (!ini || !primeira) return null;
   const [h, m] = ini.split(':').map(Number), esp = D.parse(dia); esp.setHours(h, m, 0, 0);
   const min = Math.round((primeira - esp) / 60000);
-  return min > Bat.atrasoMin() && min < 240 ? min : null;
+  const fimH = horaFim(f, dia); let lim = 600;
+  if (fimH) { const [h2, m2] = fimH.split(':').map(Number), fim = D.parse(dia); fim.setHours(h2, m2, 0, 0); if (+fim <= +esp) fim.setDate(fim.getDate() + 1); lim = (fim - esp) / 60000; }
+  return min > Bat.atrasoMin() && min < lim ? min : null;
 }
 /* batidas de hoje ao vivo: avisa na tela (e no computador, se liberado) quando alguém chega atrasado */
 const PontoHoje = {
@@ -1607,7 +1632,7 @@ function vFunc(pg) {
   let body = '';
   if (S.tab === 'dados') body = `<div class="card"><div class="sec" style="margin-top:0">Dados pessoais</div><div class="fgrid">${kv('Nascimento', f.nascimento ? `${D.fmt(f.nascimento)} · ${D.idade(f.nascimento)} anos` : '')}${kv('CPF', esc(f.cpf))}${kv('RG', esc([f.rg, f.rgOrgao].filter(Boolean).join(' · ')))}${kv('PIS', esc(f.pis))}${kv('CTPS', esc([f.ctps, f.ctpsSerie].filter(Boolean).join(' / ')))}${kv('Título de eleitor', esc(f.titulo))}${kv('Estado civil', esc(f.estadoCivil))}${kv('Escolaridade', esc(f.escolaridade))}${kv('Mãe', esc(f.mae))}${kv('Pai', esc(f.pai))}</div>
       <div class="sec">Contato</div><div class="fgrid">${kv('Telefone', esc(f.telefone))}${kv('E-mail', esc(f.email))}${kv('Endereço', esc([f.endereco, f.bairro].filter(Boolean).join(' · ')))}${kv('Cidade', esc([f.cidade, f.cep].filter(Boolean).join(' · ')))}${kv('Emergência', esc(f.emergencia))}</div>
-      <div class="sec">Trabalho</div><div class="fgrid">${kv('Cargo', esc(f.cargo))}${kv('Loja', esc(Lojas.nome(f.loja)))}${kv('Salário', f.salario ? brl(num(f.salario)) : '')}${kv('Horário', esc(f.horario))}${f.horarioDom ? kv('Domingo', esc(f.horarioDom)) : ''}${kv('Carga horária', esc(f.carga))}${kv('Dias de trabalho', (f.dias || []).length ? f.dias.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(i => SEMANA[i].slice(0, 3)).join(', ') : '')}${kv('Chave Pix / banco', esc(f.pix))}${kv('Próximo exame (ASO)', D.fmt(f.proxExame))}</div>
+      <div class="sec">Trabalho</div><div class="fgrid">${kv('Cargo', esc(f.cargo))}${kv('Loja', esc(Lojas.nome(f.loja)))}${kv('Salário', f.salario ? brl(num(f.salario)) : '')}${kv('Horário', esc((turnoDe(f) ? turnoDe(f).nome + ' · ' : '') + horarioBase(f)))}${f.horarioDom ? kv('Domingo', esc(f.horarioDom)) : ''}${kv('Carga horária', esc(f.carga))}${kv('Dias de trabalho', (f.dias || []).length ? f.dias.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(i => SEMANA[i].slice(0, 3)).join(', ') : '')}${kv('Chave Pix / banco', esc(f.pix))}${kv('Próximo exame (ASO)', D.fmt(f.proxExame))}</div>
       <div class="sec">Tamanhos de uniforme</div><div class="fgrid">${kv('Camiseta', esc(f.tamCamiseta))}${kv('Calça', esc(f.tamCalca))}${kv('Calçado', esc(f.tamCalcado))}</div>
       ${f.obs ? `<div class="sec">Observações</div><p style="margin:0;white-space:pre-wrap">${esc(f.obs)}</p>` : ''}</div>`;
   if (S.tab === 'contrato') {
@@ -1676,13 +1701,14 @@ function editarFicha(f) {
   const m = modal({ title: novo ? 'Novo funcionário' : 'Editar ficha', wide: true, body: `
     <div class="sec" style="margin-top:0">Dados pessoais</div><div class="fgrid">${F('Nome completo *', 'nome', f.nome, { cls: 'w2' })}${F('Data de nascimento', 'nascimento', f.nascimento, { type: 'date' })}${F('CPF', 'cpf', f.cpf, { ph: '000.000.000-00' })}${F('RG', 'rg', f.rg)}${F('Órgão emissor', 'rgOrgao', f.rgOrgao, { ph: 'SSP/SC' })}${F('PIS', 'pis', f.pis)}${F('CTPS nº', 'ctps', f.ctps)}${F('CTPS série', 'ctpsSerie', f.ctpsSerie)}${F('Título de eleitor', 'titulo', f.titulo)}${F('Estado civil', 'estadoCivil', f.estadoCivil, { type: 'select', opts: ['', 'Solteiro(a)', 'Casado(a)', 'União estável', 'Divorciado(a)', 'Viúvo(a)'] })}${F('Escolaridade', 'escolaridade', f.escolaridade, { type: 'select', opts: ['', 'Fundamental incompleto', 'Fundamental completo', 'Médio incompleto', 'Médio completo', 'Superior incompleto', 'Superior completo'] })}${F('Nome da mãe', 'mae', f.mae, { cls: 'w2' })}${F('Nome do pai', 'pai', f.pai, { cls: 'w2' })}</div>
     <div class="sec">Contato e endereço</div><div class="fgrid">${F('Telefone / WhatsApp', 'telefone', f.telefone)}${F('E-mail', 'email', f.email, { type: 'email' })}${F('Endereço', 'endereco', f.endereco, { cls: 'w2' })}${F('Bairro', 'bairro', f.bairro)}${F('Cidade / UF', 'cidade', f.cidade)}${F('CEP', 'cep', f.cep)}${F('Contato de emergência', 'emergencia', f.emergencia, { ph: 'Nome e telefone', cls: 'w2' })}</div>
-    <div class="sec">Trabalho e contrato</div><div class="fgrid">${F('Cargo', 'cargo', f.cargo, { attrs: 'list="dl-cargos"' })}<datalist id="dl-cargos">${c.cargos.map(x => `<option value="${esc(x)}">`).join('')}</datalist>${F('Loja', 'loja', f.loja, { type: 'select', opts: lojas })}${F('Salário (R$)', 'salario', f.salario, { type: 'money', ph: '0,00' })}${F('Horário', 'horario', f.horario, { ph: 'Ex.: 17:05 às 01:00' })}${F('Horário no domingo (só se for diferente)', 'horarioDom', f.horarioDom, { ph: 'Padrão: ' + (c.pontoDomHorario || '18:00 às 00:45') })}${F('Carga horária', 'carga', f.carga, { ph: 'Ex.: 44h semanais' })}${F('Jornada no ponto (por dia)', 'jornadaPonto', f.jornadaPonto, { ph: 'Padrão: ' + (c.pontoJornada || '7:20') })}${F('Intervalo (min)', 'intervaloPonto', f.intervaloPonto, { type: 'number', ph: 'Padrão: ' + (c.pontoIntervalo ?? 60) })}<div class="field w2"><span>Dias de trabalho</span><div class="chips">${SEMANA.map((d, i) => `<label class="row small" style="gap:4px;border:1px solid var(--line);border-radius:20px;padding:5px 10px"><input type="checkbox" data-dia="${i}" ${(f.dias || [2, 3, 4, 5, 6, 0]).includes(i) ? 'checked' : ''}>${d.slice(0, 3)}</label>`).join('')}</div></div>${F('Data de admissão *', 'admissao', f.admissao, { type: 'date' })}${F('1º período (dias)', 'exp1', f.exp1 || c.exp1, { type: 'number' })}${F('Renovação (dias)', 'exp2', f.exp2 || c.exp2, { type: 'number' })}${F('Situação do contrato', 'contratoStatus', f.contratoStatus || 'exp1', { type: 'select', opts: [['exp1', 'Experiência (1º período)'], ['renovado', 'Experiência renovada'], ['efetivado', 'Efetivado']] })}${F('Chave Pix / banco', 'pix', f.pix)}${F('Nome no Pedido X (se for diferente)', 'nomePedidoX', f.nomePedidoX, { ph: 'Como aparece no caixa' })}${F('Próximo exame (ASO)', 'proxExame', f.proxExame, { type: 'date' })}</div>
+    <div class="sec">Trabalho e contrato</div><div class="fgrid">${F('Cargo', 'cargo', f.cargo, { attrs: 'list="dl-cargos"' })}<datalist id="dl-cargos">${c.cargos.map(x => `<option value="${esc(x)}">`).join('')}</datalist>${F('Loja', 'loja', f.loja, { type: 'select', opts: lojas })}${F('Salário (R$)', 'salario', f.salario, { type: 'money', ph: '0,00' })}${F('Turno', 'turno', f.turno || '', { type: 'select', opts: [['', 'Personalizado (escrever o horário)'], ...(c.turnos || []).map(t => [t.id, `${t.nome} · ${t.horario}`])] })}${F('Horário', 'horario', turnoDe(f) ? turnoDe(f).horario : f.horario, { ph: 'Ex.: 17:05 às 01:00' })}${F('Horário no domingo (só se for diferente)', 'horarioDom', f.horarioDom, { ph: 'Padrão: ' + (c.pontoDomHorario || '18:00 às 00:45') })}${F('Carga horária', 'carga', f.carga, { ph: 'Ex.: 44h semanais' })}${F('Jornada no ponto (por dia)', 'jornadaPonto', f.jornadaPonto, { ph: 'Padrão: ' + (c.pontoJornada || '7:20') })}${F('Intervalo (min)', 'intervaloPonto', f.intervaloPonto, { type: 'number', ph: 'Padrão: ' + (c.pontoIntervalo ?? 60) })}<div class="field w2"><span>Dias de trabalho</span><div class="chips">${SEMANA.map((d, i) => `<label class="row small" style="gap:4px;border:1px solid var(--line);border-radius:20px;padding:5px 10px"><input type="checkbox" data-dia="${i}" ${(f.dias || [2, 3, 4, 5, 6, 0]).includes(i) ? 'checked' : ''}>${d.slice(0, 3)}</label>`).join('')}</div></div>${F('Data de admissão *', 'admissao', f.admissao, { type: 'date' })}${F('1º período (dias)', 'exp1', f.exp1 || c.exp1, { type: 'number' })}${F('Renovação (dias)', 'exp2', f.exp2 || c.exp2, { type: 'number' })}${F('Situação do contrato', 'contratoStatus', f.contratoStatus || 'exp1', { type: 'select', opts: [['exp1', 'Experiência (1º período)'], ['renovado', 'Experiência renovada'], ['efetivado', 'Efetivado']] })}${F('Chave Pix / banco', 'pix', f.pix)}${F('Nome no Pedido X (se for diferente)', 'nomePedidoX', f.nomePedidoX, { ph: 'Como aparece no caixa' })}${F('Próximo exame (ASO)', 'proxExame', f.proxExame, { type: 'date' })}</div>
     <div id="ef-prev" class="alert info" style="margin-top:12px"></div>
     <div class="sec">Tamanhos de uniforme</div><div class="fgrid">${F('Camiseta', 'tamCamiseta', f.tamCamiseta, { ph: 'P, M, G, GG' })}${F('Calça', 'tamCalca', f.tamCalca, { ph: '38, 40, 42…' })}${F('Calçado', 'tamCalcado', f.tamCalcado, { ph: '36, 38…' })}</div>
     ${F('Observações', 'obs', f.obs, { type: 'area' })}`,
     foot: `${!novo ? '<button class="btn danger" id="ef-del" style="margin-right:auto">Excluir</button>' : ''}<button class="btn" data-x>Cancelar</button><button class="btn primary" id="ef-ok">${novo ? 'Cadastrar' : 'Salvar'}</button>` });
   setTimeout(() => $('[data-k=nome]', m.el).focus(), 50);
   /* prévia das datas do contrato enquanto preenche */
+  { const st = $('[data-k=turno]', m.el), hr = $('[data-k=horario]', m.el), sync = () => { const t = (c.turnos || []).find(x => x.id === st.value); hr.readOnly = !!t; if (t) hr.value = t.horario; }; st.onchange = sync; sync(); }
   const prev = () => {
     const v = k => ($(`[data-k=${k}]`, m.el) || {}).value, adm = v('admissao'), e1 = +v('exp1') || c.exp1, e2 = +v('exp2') || c.exp2, st = v('contratoStatus'), el = $('#ef-prev', m.el);
     if (!adm) { el.innerHTML = '<span>Coloque a <b>data de admissão</b> para ver as datas do contrato.</span>'; return; }
@@ -1964,6 +1990,9 @@ function vCfg(pg) {
       <p class="small" style="margin:0">Link: <b>${esc(location.href.replace(/[#?].*$/, '').replace(/index\.html$/, '').replace(/\/?$/, '/'))}ponto.html</b></p>
       <div class="fgrid">${F('Jornada por dia (padrão)', 'pontoJornada', c.pontoJornada, { ph: '7:20' })}${F('Intervalo pré-assinalado (min)', 'pontoIntervalo', c.pontoIntervalo, { type: 'number' })}${F('Tolerância por dia (min)', 'pontoTolerancia', c.pontoTolerancia, { type: 'number' })}${F('O dia vira às (hora)', 'pontoVirada', c.pontoVirada, { type: 'number' })}</div>
       <label class="check"><input type="checkbox" data-k="pontoBloquearAntes" ${c.pontoBloquearAntes !== false ? 'checked' : ''}><span><b>Não deixar bater o ponto muito antes do horário</b> de entrada que está na ficha de cada um (campo Horário). Ex.: entrada 17:05 e 5 min → libera a partir das 17:00.</span></label>
+      <div class="sec" style="margin:6px 0 0">Turnos (para escolher na ficha de cada um)</div>
+      <div id="cf-tu" class="col" style="gap:6px">${(c.turnos || []).map((t, i) => `<div class="row" style="flex-wrap:nowrap"><input class="input" data-tn="${i}" value="${esc(t.nome)}" placeholder="Nome do turno" style="max-width:200px"><input class="input" data-th="${i}" value="${esc(t.horario)}" placeholder="09:00 às 17:20" style="max-width:180px"><input class="input num" type="number" data-ti="${i}" value="${t.intervalo ?? 60}" style="width:90px" title="Intervalo (min)"><span class="muted small">min de intervalo</span><button class="btn sm ghost" data-tx="${i}">×</button></div>`).join('')}</div>
+      <div class="row"><button class="btn sm" id="cf-tadd">${ico('plus')} Turno</button><button class="btn sm" id="cf-heq">${ico('users')} Escolher o turno de cada um</button></div>
       <div class="fgrid">${F('Domingo: horário de todos', 'pontoDomHorario', c.pontoDomHorario ?? '18:00 às 00:45', { ph: '18:00 às 00:45' })}${F('Domingo: intervalo (min)', 'pontoDomIntervalo', c.pontoDomIntervalo ?? 15, { type: 'number' })}</div>
       <div class="fgrid">${F('Libera quantos min antes da entrada', 'pontoAntecedencia', c.pontoAntecedencia ?? 5, { type: 'number' })}${F('Atraso: conta depois de quantos min', 'pontoAtraso', c.pontoAtraso ?? 5, { type: 'number' })}</div>
       <label class="check"><input type="checkbox" data-k="pontoPedirPin" ${c.pontoPedirPin === true ? 'checked' : ''}><span><b>Pedir PIN</b> no tablet. Desmarcado: a pessoa toca no nome e o tablet tira a selfie direto — a foto é o que confirma quem bateu.</span></label>
@@ -1983,6 +2012,7 @@ function vCfg(pg) {
     o.exp1 = +o.exp1 || 30; o.exp2 = +o.exp2 || 60; o.avisoDias = Math.max(0, +o.avisoDias || 0); ['valorTeste', 'valorExameAdm', 'valorExameDem'].forEach(k => o[k] = num(o[k])); o.diasTeste = Math.max(1, +o.diasTeste || 3);
     o.pontoJornada = o.pontoJornada || '7:20'; o.pontoIntervalo = Math.max(0, +o.pontoIntervalo || 0); o.pontoTolerancia = Math.max(0, Math.min(10, +o.pontoTolerancia || 0)); o.pontoVirada = Math.max(0, Math.min(10, +o.pontoVirada || 0)); o.pontoAntecedencia = Math.max(0, Math.min(120, +o.pontoAntecedencia || 0)); o.pontoDomIntervalo = Math.max(0, Math.min(120, +o.pontoDomIntervalo || 0)); o.pontoAtraso = Math.max(0, Math.min(60, +o.pontoAtraso || 0));
     o.feriadosLocais = $$('[data-fd]', pg).map(i => { const n = +i.dataset.fd, [dd, mm] = i.value.split('/').map(s => s.trim()); return { md: dd && mm ? `${pad2(+mm)}-${pad2(+dd)}` : '', nome: $(`[data-fn="${n}"]`, pg).value.trim(), loja: $(`[data-fl="${n}"]`, pg).value }; }).filter(h => h.nome);
+    o.turnos = $$('[data-tn]', pg).map(i => { const n = +i.dataset.tn, ant = (c.turnos || [])[n]; return { id: ant ? ant.id : uid(), nome: i.value.trim(), horario: $(`[data-th="${n}"]`, pg).value.trim(), intervalo: Math.max(0, +$(`[data-ti="${n}"]`, pg).value || 0) }; }).filter(t => t.nome && t.horario);
     o.motivosAdv = $$('[data-mn]', pg).map(i => { const n = +i.dataset.mn, ant = c.motivosAdv[n]; return { id: ant ? ant.id : uid(), nome: i.value.trim(), texto: $(`[data-mt="${n}"]`, pg).value.trim() }; }).filter(x => x.nome);
     return o;
   };
@@ -1993,6 +2023,9 @@ function vCfg(pg) {
   on2('#rg-st', () => copiarTexto(regrasStorage(emailsForm()), 'Regras do Storage copiadas')); on2('#px-sync', () => PX.sync(true)); on2('#px-out', () => PX.sair());
   $('#cf-sv', pg).onclick = async () => { const o = ler(); if (o.exp1 + o.exp2 > 90) return toast('O contrato de experiência não pode passar de 90 dias', 'bad'); await Store.setCfg(o); toast('Configurações salvas'); };
   $('#cf-fadd', pg).onclick = () => { Store.cfgDoc = Object.assign(ler(), { feriadosLocais: [...ler().feriadosLocais, { md: '', nome: ' ', loja: '' }] }); App.render(); };
+  $('#cf-tadd', pg).onclick = () => { const o = ler(); o.turnos.push({ id: uid(), nome: 'Novo turno', horario: '17:05 às 01:00', intervalo: 60 }); Store.cfgDoc = o; App.render(); };
+  $$('[data-tx]', pg).forEach(b => b.onclick = () => { const o = ler(); o.turnos.splice(+b.dataset.tx, 1); Store.cfgDoc = o; App.render(); });
+  $('#cf-heq', pg).onclick = async () => { await Store.setCfg(ler()); horariosEquipe(); };
   $('#cf-madd', pg).onclick = () => { const o = ler(); o.motivosAdv.push({ id: uid(), nome: 'Novo motivo', texto: '' }); Store.cfgDoc = o; App.render(); };
   $$('[data-fx]', pg).forEach(b => b.onclick = () => { const o = ler(); o.feriadosLocais.splice(+b.dataset.fx, 1); Store.cfgDoc = o; App.render(); });
   $$('[data-mx]', pg).forEach(b => b.onclick = () => { const o = ler(); o.motivosAdv.splice(+b.dataset.mx, 1); Store.cfgDoc = o; App.render(); });
