@@ -97,7 +97,7 @@ a.btn{color:var(--ink);text-decoration:none}
 .pv-ov{position:fixed;inset:0;z-index:80;background:#e9ece9;display:flex;flex-direction:column}.pv-bar{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#121614;color:#fff}.pv-bar .btn:not(.primary){color:var(--ink)}.pv-fr{flex:1;border:0;width:100%;background:#e9ece9}
 </style></head>
 <body><div id="app"></div><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script><script src="config.js"></script><script>/* DP X · Departamento pessoal do Xis da Gaúcha — núcleo */
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.11.1';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -942,7 +942,7 @@ function sincronizarPins() {
     const pedir = Bat.pedirPin();
     if (!pedir) for (const f of Func.ativos()) if (!Store.get('pontoPin', f.id)) await Store.put('pontoPin', { id: f.id, nome: f.nome, loja: f.loja, ativo: true, pedirPin: false }).catch(() => {});
     /* dados da empresa para o comprovante impresso do tablet */
-    { const e = empresa(), cur = Store.get('pontoPin', '_empresa') || {}, alvo = { razao: e.razao || '', cnpj: e.cnpj || '', endereco: e.endereco || '', cidade: e.cidade || '' };
+    { const e = empresa(), cur = Store.get('pontoPin', '_empresa') || {}, alvo = { razao: e.razao || '', cnpj: e.cnpj || '', endereco: e.endereco || '', cidade: e.cidade || '', virada: Bat.virada() };
       if (Object.keys(alvo).some(k => cur[k] !== alvo[k])) await Store.put('pontoPin', Object.assign({ id: '_empresa' }, alvo)).catch(() => {}); }
     for (const p of Store.all('pontoPin').filter(x => !String(x.id).startsWith('_'))) {
       const c = Store.cfg(), antes = c.pontoBloquearAntes === false ? null : Math.max(0, +c.pontoAntecedencia || 0), atr = Bat.atrasoMin();
@@ -1988,7 +1988,7 @@ function vCfg(pg) {
       <p class="muted small" style="margin:0">Cada loja tem um tablet com o link abaixo. O funcionário toca no nome${c.pontoPedirPin === true ? ', digita o PIN' : ''} e a câmera abre na hora: a foto sai com data e horário gravados e é comparada com o rosto cadastrado (Ponto do mês → Rostos). As batidas aparecem em Ponto do mês.</p>
       <div class="row"><span class="pill ${c.tabletCriado ? 'ok' : ''}">${c.tabletCriado ? 'senha do tablet criada em ' + D.fmt(c.tabletCriado) : 'senha do tablet não criada'}</span><button class="btn sm" id="tb-ac">${c.tabletCriado ? 'Trocar a senha do tablet' : 'Criar a senha do tablet'}</button><button class="btn sm" id="tb-lk">${ico('link')} Copiar o link do tablet</button></div>
       <p class="small" style="margin:0">Link: <b>${esc(location.href.replace(/[#?].*$/, '').replace(/index\.html$/, '').replace(/\/?$/, '/'))}ponto.html</b></p>
-      <div class="fgrid">${F('Jornada por dia (padrão)', 'pontoJornada', c.pontoJornada, { ph: '7:20' })}${F('Intervalo pré-assinalado (min)', 'pontoIntervalo', c.pontoIntervalo, { type: 'number' })}${F('Tolerância por dia (min)', 'pontoTolerancia', c.pontoTolerancia, { type: 'number' })}${F('O dia vira às (hora)', 'pontoVirada', c.pontoVirada, { type: 'number' })}</div>
+      <div class="fgrid">${F('Jornada por dia (padrão)', 'pontoJornada', c.pontoJornada, { ph: '7:20' })}${F('Intervalo pré-assinalado (min)', 'pontoIntervalo', c.pontoIntervalo, { type: 'number' })}${F('Tolerância por dia (min)', 'pontoTolerancia', c.pontoTolerancia, { type: 'number' })}${F('O dia de trabalho vira às (hora)', 'pontoVirada', c.pontoVirada, { type: 'number' })}</div>
       <label class="check"><input type="checkbox" data-k="pontoBloquearAntes" ${c.pontoBloquearAntes !== false ? 'checked' : ''}><span><b>Não deixar bater o ponto muito antes do horário</b> de entrada que está na ficha de cada um (campo Horário). Ex.: entrada 17:05 e 5 min → libera a partir das 17:00.</span></label>
       <div class="sec" style="margin:6px 0 0">Turnos (para escolher na ficha de cada um)</div>
       <div id="cf-tu" class="col" style="gap:6px">${(c.turnos || []).map((t, i) => `<div class="row" style="flex-wrap:nowrap"><input class="input" data-tn="${i}" value="${esc(t.nome)}" placeholder="Nome do turno" style="max-width:200px"><input class="input" data-th="${i}" value="${esc(t.horario)}" placeholder="09:00 às 17:20" style="max-width:180px"><input class="input num" type="number" data-ti="${i}" value="${t.intervalo ?? 60}" style="width:90px" title="Intervalo (min)"><span class="muted small">min de intervalo</span><button class="btn sm ghost" data-tx="${i}">×</button></div>`).join('')}</div>
