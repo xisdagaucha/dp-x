@@ -71,7 +71,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--mu
 <script>
 /* Ponto X · registro de ponto no tablet da loja (Xis da Gaúcha)
    As batidas vão para o Firebase do DP X, com o horário do servidor e uma selfie. */
-const VERSAO = '1.1.0';
+const VERSAO = '1.3.0';
 const TABLET_EMAIL = 'tablet@ponto.xisdagaucha.com.br';
 const LOJAS = [{ id: 'barreiros', nome: 'Barreiros · São José' }, { id: 'palhoca', nome: 'Centro · Palhoça' }];
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
@@ -94,6 +94,50 @@ async function hashPin(funcId, pin) {
 }
 const ls = { get(k, d = null) { try { const v = localStorage.getItem('pontox_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem('pontox_' + k, JSON.stringify(v)); } catch (e) { } } };
 function dispId() { let d = ls.get('disp'); if (!d) { d = 'tab-' + Math.random().toString(36).slice(2, 10); ls.set('disp', d); } return d; }
+
+/* reconhecimento facial (mesmo código no DP X e no Ponto X) */
+const FACE_LIB = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js';
+const FACE_MODELOS = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/';
+const Rosto = {
+  estado: 'off', erro: null, _p: null, LIMITE: 0.55,
+  carregar() {
+    if (this._p) return this._p;
+    this.estado = 'carregando';
+    const p = new Promise((res, rej) => { if (window.faceapi) return res(); const s = document.createElement('script'); s.src = FACE_LIB; s.async = true; s.onload = () => res(); s.onerror = () => rej(new Error('Não consegui baixar o reconhecimento facial')); document.head.appendChild(s); })
+      .then(async () => {
+        if (faceapi.tf && faceapi.tf.ready) await faceapi.tf.ready();
+        const n = faceapi.nets; await n.tinyFaceDetector.load(FACE_MODELOS); await n.faceLandmark68Net.load(FACE_MODELOS); await n.faceRecognitionNet.load(FACE_MODELOS);
+        this.estado = 'pronto';
+      });
+    this._p = p.catch(e => { this.estado = 'erro'; this.erro = e; this._p = null; throw e; });
+    return this._p;
+  },
+  /* 128 números que descrevem o rosto, ou null se não achou rosto */
+  async descritor(canvas) {
+    const r = await faceapi.detectSingleFace(canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 })).withFaceLandmarks().withFaceDescriptor();
+    return r ? Array.from(r.descriptor) : null;
+  },
+  distancia(a, b) { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s); },
+  /* quadro inteiro da câmera, espelhado (igual ao que a pessoa vê) */
+  quadro(v) { const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; const g = c.getContext('2d'); g.translate(c.width, 0); g.scale(-1, 1); g.drawImage(v, 0, 0); return c; },
+  /* recorte 3x4 em JPEG; com carimbo de data/hora quando recebe as linhas */
+  recorte(q, w, h, linhas, qual = 0.66) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+    const alvo = w / h; let sw = q.width, sh = q.height, sx = 0, sy = 0;
+    if (q.width / q.height > alvo) { sw = q.height * alvo; sx = (q.width - sw) / 2; } else { sh = q.width / alvo; sy = (q.height - sh) / 2; }
+    g.drawImage(q, sx, sy, sw, sh, 0, 0, w, h);
+    if (linhas) {
+      g.fillStyle = 'rgba(0,0,0,.62)'; g.fillRect(0, h - 64, w, 64); g.fillStyle = '#fff'; g.textBaseline = 'alphabetic';
+      const caber = (t, px, bold) => { let s = px; do { g.font = `${bold ? 'bold ' : ''}${s}px system-ui, Arial, sans-serif`; s--; } while (g.measureText(t).width > w - 20 && s > 9); };
+      caber(linhas[0], 24, true); g.fillText(linhas[0], 10, h - 36);
+      caber(linhas[1], 14, false); g.fillText(linhas[1], 10, h - 14);
+    }
+    return c.toDataURL('image/jpeg', qual);
+  }
+};
+
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const dataBr = d => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
 
 const P = {
   demo: !window.FIREBASE_CONFIG || /demo/.test(location.search + location.hash),
@@ -161,9 +205,10 @@ const P = {
     const aqui = this.loja(), ord = (a, b) => a.nome.localeCompare(b.nome);
     const daqui = this.pessoas.filter(p => p.loja === aqui).sort(ord), outros = this.pessoas.filter(p => p.loja !== aqui).sort(ord);
     const card = p => `<button class="p" data-p="${esc(p.id)}"><span class="av">${esc(iniciais(p.nome))}</span><b>${esc(p.apelido || primeiro(p.nome))}</b><small>${esc(p.nome.split(/\s+/).slice(1, 3).join(' '))}</small></button>`;
-    el.innerHTML = !this.pessoas.length ? '<div class="empty">Ninguém liberado no tablet ainda.<br>No DP X: gere os PINs em Ponto do mês, ou desligue o PIN em Configurações → Ponto no tablet.</div>'
+    el.innerHTML = !this.pessoas.length ? '<div class="empty">Ninguém liberado no tablet ainda.<br>No DP X, em Configurações → Ponto no tablet, confira se o PIN está desligado e clique em Salvar.</div>'
       : `<div class="grid">${daqui.map(card).join('')}</div>${outros.length ? `<div class="sec">Da outra loja</div><div class="grid">${outros.map(card).join('')}</div>` : ''}`;
-    $$('[data-p]', el).forEach(b => b.onclick = () => this.pin(this.pessoas.find(p => p.id === b.dataset.p)));
+    $$('[data-p]', el).forEach(b => b.onclick = () => this.tocar(this.pessoas.find(p => p.id === b.dataset.p)));
+    if (this.pessoas.some(p => Array.isArray(p.face)) && Rosto.estado === 'off') Rosto.carregar().catch(() => {});
   },
   relogio() {
     const d = new Date(this.agora()), h = $('#hora'), dt = $('#data'); if (!h) return;
@@ -195,17 +240,40 @@ const P = {
   },
   fecharOv() { clearTimeout(this._idle); this.pararCamera(); if (this.overlay) { this.overlay.remove(); this.overlay = null; } },
 
-  /* ---------- PIN ---------- */
-  pin(p) {
+  /* ---------- tocar no nome ---------- */
+  tocar(p) {
     if (!p) return;
-    /* PIN desligado no DP X: vai direto para a selfie (com confirmação do nome) */
-    if (p.pedirPin === false) {
-      if (this.demo) return this.confirmarRepetida(p);
-      const o = this.ov(`<h2>Você é ${esc(primeiro(p.nome))}?</h2><p>${esc(p.nome)}</p><button class="btn pri" data-s>Sim, registrar o ponto</button><button class="btn ghost" data-c>Não, voltar</button>`);
-      $('[data-s]', o).onclick = () => this.confirmarRepetida(p); $('[data-c]', o).onclick = () => this.fecharOv();
-      return;
-    }
-    if (!p.hash && !this.demo) { const o = this.ov(`<h2>${esc(primeiro(p.nome))}</h2><p>Você ainda não tem PIN. Peça para a gerência criar no DP X.</p><button class="btn" data-c>Ok</button>`); $('[data-c]', o).onclick = () => this.fecharOv(); return; }
+    const j = this.janela(p);
+    if (j.cedo) return this.cedo(p, j);
+    p = Object.assign({}, p, { _entrada: j.entrada, _esp: j.esp });
+    if (p.pedirPin === true && p.hash) return this.pin(p);
+    this.confirmarRepetida(p);
+  },
+  /* horário de entrada da ficha: hoje é entrada? está cedo demais? */
+  janela(p) {
+    const ult = ls.get('ult_' + p.id, 0), agora = this.agora(), entrada = !(ult && agora - ult < 14 * 3600e3 && ult >= this.inicioDia(agora));
+    if (!p.inicio) return { entrada };
+    const [h, m] = p.inicio.split(':').map(Number), esp = new Date(agora); esp.setHours(h, m, 0, 0);
+    const antes = (+esp - agora) / 60000;
+    if (entrada && p.antes != null && antes > p.antes && antes <= 240) return { cedo: true, esp: +esp, libera: +esp - p.antes * 60000 };
+    return { entrada, esp: +esp };
+  },
+  inicioDia(t) { const d = new Date(t); if (d.getHours() < 5) d.setDate(d.getDate() - 1); d.setHours(5, 0, 0, 0); return +d; },
+  cedo(p, j) {
+    const o = this.ov(`<h2>Ainda não, ${esc(primeiro(p.nome))}</h2><p>Sua entrada é às <b>${hhmm(j.esp)}</b>.<br>Você pode bater o ponto a partir das <b style="color:var(--acc)">${hhmm(j.libera)}</b>.</p>
+      <button class="btn pri" data-c>Ok</button><button class="btn ghost" data-g>A gerência liberou</button>`, { tempo: 12000 });
+    $('[data-c]', o).onclick = () => this.fecharOv();
+    $('[data-g]', o).onclick = () => {
+      const o2 = this.ov(`<h2>Liberar o ponto</h2><p>Gerência: digite a senha do tablet para deixar ${esc(primeiro(p.nome))} bater o ponto agora.</p><label class="f">Senha do tablet<input class="input" id="lb-pw" type="password"></label><div class="err" id="lb-err"></div><button class="btn pri" data-s>Liberar</button><button class="btn ghost" data-c>Cancelar</button>`);
+      $('[data-c]', o2).onclick = () => this.fecharOv();
+      $('[data-s]', o2).onclick = async () => {
+        if (!this.demo) { try { await firebase.auth().currentUser.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(TABLET_EMAIL, $('#lb-pw', o2).value)); } catch (e) { $('#lb-err', o2).textContent = 'Senha incorreta.'; return; } }
+        this.camera(Object.assign({}, p, { _lib: true, _entrada: true, _esp: j.esp }));
+      };
+    };
+  },
+  /* PIN (só se a gestão ligar a opção no DP X) */
+  pin(p) {
     const trava = ls.get('trava_' + p.id, 0);
     if (trava > Date.now()) { this.ov(`<h2>${esc(primeiro(p.nome))}</h2><p>PIN errado várias vezes. Tente de novo em ${Math.ceil((trava - Date.now()) / 1000)} segundos ou chame a gerência.</p><button class="btn" data-c>Ok</button>`); $('[data-c]', this.overlay).onclick = () => this.fecharOv(); return; }
     let dig = '';
@@ -219,11 +287,7 @@ const P = {
     };
     $$('[data-n]', o).forEach(b => b.onclick = async () => {
       if (dig.length >= 4) return; dig += b.dataset.n; dots();
-      if (dig.length === 4) {
-        const ok = this.demo ? true : (await hashPin(p.id, dig)) === p.hash;
-        if (!ok) return errou();
-        ls.set('erros_' + p.id, 0); this.confirmarRepetida(p);
-      }
+      if (dig.length === 4) { if ((await hashPin(p.id, dig)) !== p.hash) return errou(); ls.set('erros_' + p.id, 0); this.confirmarRepetida(p); }
     });
     $('[data-b]', o).onclick = () => { dig = dig.slice(0, -1); dots(); };
     $('[data-c]', o).onclick = () => this.fecharOv();
@@ -239,55 +303,75 @@ const P = {
     this.camera(p);
   },
 
-  /* ---------- selfie ---------- */
+  /* ---------- câmera: abre na hora, tira a foto e confere o rosto ---------- */
   async camera(p) {
-    const o = this.ov(`<h2>Olhe para a câmera</h2><div class="cam" id="cam"><video id="vid" playsinline muted autoplay></video><span class="ring"></span><span class="cd" id="cd"></span></div><p>A foto sai sozinha</p>`, { fechar: false, tempo: 30000 });
-    let foto = null;
+    const o = this.ov(`<h2>${esc(primeiro(p.nome))}, olhe para a câmera</h2><div class="cam" id="cam"><video id="vid" playsinline muted autoplay></video><span class="ring"></span><span class="cd" id="cd"></span></div><button class="btn ghost" data-c>Cancelar</button>`, { fechar: false, tempo: 30000 });
+    $('[data-c]', o).onclick = () => this.fecharOv();
+    let q;
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       const v = $('#vid', o); v.srcObject = this.stream; await v.play();
-      await new Promise(r => setTimeout(r, 400));
-      for (const n of [3, 2, 1]) { if (!this.overlay) return; $('#cd', o).textContent = n; await new Promise(r => setTimeout(r, 800)); }
+      await wait(350);
+      for (const n of [2, 1]) { if (this.overlay !== o) return; $('#cd', o).textContent = n; await wait(700); }
+      if (this.overlay !== o) return;
       $('#cd', o).textContent = ''; $('#cam', o).classList.add('flash');
-      foto = this.capturar(v);
+      q = Rosto.quadro(v);
     } catch (e) {
-      if (!this.overlay) return;
+      if (this.overlay !== o) return;
       const o2 = this.ov(`<h2>Câmera indisponível</h2><div class="warnb">Não consegui abrir a câmera do tablet. O ponto pode ser registrado sem foto, mas fica marcado para a gerência conferir.</div><button class="btn pri" data-s>Registrar sem foto</button><button class="btn ghost" data-c>Cancelar</button>`, { fechar: false });
-      $('[data-s]', o2).onclick = () => this.registrar(p, null); $('[data-c]', o2).onclick = () => this.fecharOv();
+      $('[data-s]', o2).onclick = () => this.registrar(p, null, 'sem foto', null); $('[data-c]', o2).onclick = () => this.fecharOv();
       return;
     }
     this.pararCamera();
-    this.registrar(p, foto);
-  },
-  capturar(v) {
-    const w = 240, h = 320, c = document.createElement('canvas'); c.width = w; c.height = h;
-    const vw = v.videoWidth, vh = v.videoHeight, alvo = w / h; let sw = vw, sh = vh, sx = 0, sy = 0;
-    if (vw / vh > alvo) { sw = vh * alvo; sx = (vw - sw) / 2; } else { sh = vw / alvo; sy = (vh - sh) / 2; }
-    const g = c.getContext('2d'); g.translate(w, 0); g.scale(-1, 1); g.drawImage(v, sx, sy, sw, sh, 0, 0, w, h);
-    return c.toDataURL('image/jpeg', 0.62);
+    const d = new Date(this.agora());
+    const foto = Rosto.recorte(q, 300, 400, [`${dataBr(d)}  ${hhmm(+d)}`, `${p.nome} · ${this.lojaNome(this.loja())}`]);
+    /* confere o rosto com o cadastro feito pela gestão */
+    let rosto = 'sem cadastro', dist = null;
+    if (Array.isArray(p.face) && p.face.length === 128) {
+      this.ov(`<h2>Conferindo o rosto…</h2><img src="${foto}" alt="" style="width:150px;border-radius:12px;align-self:center">`, { fechar: false, tempo: 0 });
+      if (Rosto.estado !== 'pronto') { try { await Promise.race([Rosto.carregar(), wait(6000)]); } catch (e) { } }
+      if (Rosto.estado === 'pronto') {
+        try { const desc = await Rosto.descritor(q); if (!desc) rosto = 'sem rosto'; else { dist = Math.round(Rosto.distancia(desc, p.face) * 1000) / 1000; rosto = dist <= Rosto.LIMITE ? 'ok' : 'diferente'; } }
+        catch (e) { rosto = 'indisponivel'; }
+      } else rosto = 'indisponivel';
+    }
+    if (rosto === 'sem rosto' || rosto === 'diferente') {
+      const o3 = this.ov(`<h2>${rosto === 'sem rosto' ? 'Não achei o seu rosto' : 'O rosto não confere'}</h2><img src="${foto}" alt="" style="width:150px;border-radius:12px;align-self:center">
+        <p>${rosto === 'sem rosto' ? 'Fique de frente para a câmera, sem boné e com o rosto iluminado.' : `Esta foto não parece com o cadastro de <b>${esc(primeiro(p.nome))}</b>. Confira se tocou no nome certo.`}</p>
+        <button class="btn pri" data-s>Tentar de novo</button><button class="btn" data-r>Registrar assim mesmo</button><button class="btn ghost" data-c>Cancelar</button>`, { fechar: false });
+      $('[data-s]', o3).onclick = () => this.camera(p);
+      $('[data-r]', o3).onclick = () => this.registrar(p, foto, rosto, dist);
+      $('[data-c]', o3).onclick = () => this.fecharOv();
+      return;
+    }
+    this.registrar(p, foto, rosto, dist);
   },
   pararCamera() { if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; } },
 
   /* ---------- grava a batida ---------- */
-  async registrar(p, foto) {
-    const o = this.ov(`<h2>Registrando…</h2><p>Só um instante</p>`, { fechar: false, tempo: 0 });
+  async registrar(p, foto, rosto, dist) {
+    this.ov(`<h2>Registrando…</h2><p>Só um instante</p>`, { fechar: false, tempo: 0 });
     const local = this.agora(); let atrasou = false;
     if (!this.demo) {
       const ref = this.db.collection('batidas').doc(), ts = firebase.firestore.FieldValue.serverTimestamp(), b = this.db.batch();
-      b.set(ref, { funcId: p.id, nome: p.nome, loja: this.loja(), at: ts, atLocal: Date.now(), disp: dispId(), origem: 'tablet', foto: !!foto, v: VERSAO });
+      const dados = { funcId: p.id, nome: p.nome, loja: this.loja(), at: ts, atLocal: Date.now(), disp: dispId(), origem: 'tablet', foto: !!foto, rosto: rosto || '', dist: dist == null ? null : dist, v: VERSAO };
+      if (p._lib) dados.liberado = true;
+      b.set(ref, dados);
       if (foto) b.set(this.db.collection('batidaFotos').doc(ref.id), { funcId: p.id, at: ts, img: foto });
-      const ok = await Promise.race([b.commit().then(() => true, e => { this._erro = e; return false; }), new Promise(r => setTimeout(() => r('lento'), 10000))]);
+      const ok = await Promise.race([b.commit().then(() => true, e => { this._erro = e; return false; }), wait(10000).then(() => 'lento')]);
       if (ok === false) {
-        const e = this._erro || {}, o2 = this.ov(`<h2>Não consegui registrar</h2><div class="warnb">${/permission/i.test(e.code || '') ? 'O Firebase recusou a batida. Avise a gerência para conferir o PIN e as regras de segurança.' : 'Erro: ' + esc(e.code || e.message || '')}</div><button class="btn pri" data-s>Tentar de novo</button><button class="btn ghost" data-c>Fechar</button>`, { fechar: false });
-        $('[data-s]', o2).onclick = () => this.registrar(p, foto); $('[data-c]', o2).onclick = () => this.fecharOv();
+        const e = this._erro || {}, o2 = this.ov(`<h2>Não consegui registrar</h2><div class="warnb">${/permission/i.test(e.code || '') ? 'O Firebase recusou a batida. Avise a gerência: as regras de segurança precisam ser publicadas de novo (DP X → Configurações → Segurança do Firebase).' : 'Erro: ' + esc(e.code || e.message || '')}</div><button class="btn pri" data-s>Tentar de novo</button><button class="btn ghost" data-c>Fechar</button>`, { fechar: false });
+        $('[data-s]', o2).onclick = () => this.registrar(p, foto, rosto, dist); $('[data-c]', o2).onclick = () => this.fecharOv();
         return;
       }
       atrasou = ok === 'lento';
     }
     ls.set('ult_' + p.id, local);
-    this.ov(`<div class="ok"><span class="ic">${CHECK}</span><div class="t">${hhmm(local)}</div><div class="n">${esc(primeiro(p.nome))}, ponto registrado!</div><p>${esc(this.lojaNome(this.loja()))}</p>
+    const atraso = p._entrada && p._esp && p.atraso != null ? Math.round((local - p._esp) / 60000) : 0, atrasado = atraso > (p.atraso || 0) && atraso < 240;
+    this.ov(`<div class="ok">${foto ? `<img src="${foto}" alt="" style="width:170px;border-radius:14px">` : `<span class="ic">${CHECK}</span>`}<div class="n">${esc(primeiro(p.nome))}, ponto registrado!</div><div class="t" style="font-size:44px">${hhmm(local)}</div><p>${esc(this.lojaNome(this.loja()))}</p>
       ${atrasou ? '<div class="warnb">A internet está lenta. O ponto vai ser enviado assim que a conexão voltar — mantenha o tablet ligado e avise a gerência.</div>' : ''}
-      ${!foto ? '<div class="warnb">Registrado sem foto.</div>' : ''}</div>`, { tempo: atrasou ? 9000 : 3500 });
+      ${atrasado ? `<div class="warnb" style="background:#3a0f0f;border-color:#7a1f1f;color:#ffb3b3">Você chegou <b>${atraso} min atrasado(a)</b>. Sua entrada é às ${hhmm(p._esp)}. A gerência é avisada.</div>` : ''}
+      ${!foto ? '<div class="warnb">Registrado sem foto.</div>' : rosto === 'sem rosto' || rosto === 'diferente' ? '<div class="warnb">Registrado. A gerência vai conferir a foto.</div>' : ''}</div>`, { tempo: atrasou || atrasado ? 7000 : 3500 });
   },
 
   /* ---------- configurar (pede a senha do tablet) ---------- */

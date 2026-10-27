@@ -97,7 +97,7 @@ a.btn{color:var(--ink);text-decoration:none}
 .pv-ov{position:fixed;inset:0;z-index:80;background:#e9ece9;display:flex;flex-direction:column}.pv-bar{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#121614;color:#fff}.pv-bar .btn:not(.primary){color:var(--ink)}.pv-fr{flex:1;border:0;width:100%;background:#e9ece9}
 </style></head>
 <body><div id="app"></div><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script><script src="config.js"></script><script>/* DP X · Departamento pessoal do Xis da Gaúcha — núcleo */
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.7.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -150,7 +150,7 @@ function quintoDiaUtil(y, m) {
 }
 
 /* ======================= DADOS ======================= */
-const COLS = ['funcionarios', 'eventos', 'docs', 'pecas', 'entregas', 'candidatos', 'ponto', 'pontoPin'];
+const COLS = ['funcionarios', 'eventos', 'docs', 'pecas', 'entregas', 'candidatos', 'ponto', 'pontoPin', 'rostos'];
 const DEFAULT_CFG = {
   lojas: [
     { id: 'barreiros', nome: 'Barreiros · São José', razao: 'XIS DA GAUCHA SC LTDA', cnpj: '43.631.016/0001-05', endereco: 'Rua São Ludgero, 1778 – Barreiros', cidade: 'São José/SC', clinica: 'Rua Conselheiro Mafra, 220, Florianópolis' },
@@ -182,7 +182,7 @@ const DEFAULT_CFG = {
   },
   origens: ['Indicação', 'WhatsApp Administrativo', 'Instagram', 'Placa na loja', 'Site de vagas', 'Outro'],
   pagamentos: true,
-  pontoJornada: '7:20', pontoIntervalo: 60, pontoTolerancia: 10, pontoVirada: 5, pontoPedirPin: true, portalPonto: true, gestores: [],
+  pontoJornada: '7:20', pontoIntervalo: 60, pontoTolerancia: 10, pontoVirada: 5, pontoPedirPin: false, pontoBloquearAntes: true, pontoAntecedencia: 5, pontoAtraso: 5, portalPonto: true, gestores: [],
   createdAt: 0
 };
 const Store = {
@@ -798,7 +798,8 @@ const Bat = {
   /* a batida da madrugada conta para o dia anterior (turno da noite até 01:00) */
   dia(at) { return D.str(new Date(at - this.virada() * 3600e3)); },
   faixa(mes) { const [y, m] = mes.split('-').map(Number), v = this.virada(); return [new Date(y, m - 1, 1, v), new Date(y, m, 1, v)]; },
-  pedirPin() { return Store.cfg().pontoPedirPin !== false; },
+  pedirPin() { return Store.cfg().pontoPedirPin === true; },
+  atrasoMin() { return this.cfgN('pontoAtraso', 5); },
   temPin(fid) { const p = Store.get('pontoPin', fid); return !!(p && p.hash); },
   /* aparece no tablet: com PIN, ou qualquer ativo quando o PIN está desligado */
   noTablet(fid) { const p = Store.get('pontoPin', fid); return !!p && p.ativo !== false && (!this.pedirPin() || !!p.hash); },
@@ -827,10 +828,11 @@ const Bat = {
     const jor = this.jornada(f), itv = this.intervalo(f), tol = this.tolerancia(), por = {};
     this.doFunc(list, f.id).forEach(b => (por[this.dia(b.at)] = por[this.dia(b.at)] || []).push(b));
     const dias = [], ult = new Date(+mes.slice(0, 4), +mes.slice(5, 7), 0).getDate();
-    const tot = { trab: 0, extras: 0, faltantes: 0, pend: 0, dias: 0, semFoto: 0, atrasadas: 0 };
+    const tot = { trab: 0, extras: 0, faltantes: 0, pend: 0, dias: 0, semFoto: 0, atrasadas: 0, conferir: 0, atrasos: 0 };
     for (let i = 1; i <= ult; i++) {
       const dia = `${mes}-${pad2(i)}`, todas = por[dia] || [], v = todas.filter(b => !b.desconsiderada);
-      const r = { dia, todas, validas: v, trab: 0, esp: 0, saldo: 0, pend: false, itv: 0, not: 0 };
+      const r = { dia, todas, validas: v, trab: 0, esp: 0, saldo: 0, pend: false, itv: 0, not: 0, atraso: v.length ? atrasoDe(f, dia, v[0].at) : null };
+      if (r.atraso) tot.atrasos++;
       if (v.length) {
         tot.dias++;
         if (v.length % 2) { r.pend = true; tot.pend++; }
@@ -844,7 +846,7 @@ const Bat = {
           tot.trab += r.trab; if (r.saldo > 0) tot.extras += r.saldo; else tot.faltantes -= r.saldo;
         }
       }
-      todas.forEach(b => { if (!b.desconsiderada && b.origem === 'tablet' && !b.foto) tot.semFoto++; if (this.atrasada(b)) tot.atrasadas++; });
+      todas.forEach(b => { if (conferirRosto(b)) tot.conferir++; if (!b.desconsiderada && b.origem === 'tablet' && !b.foto) tot.semFoto++; if (this.atrasada(b)) tot.atrasadas++; });
       dias.push(r);
     }
     return { dias, tot, jor, itv };
@@ -895,7 +897,8 @@ function sincronizarPins() {
     const pedir = Bat.pedirPin();
     if (!pedir) for (const f of Func.ativos()) if (!Store.get('pontoPin', f.id)) await Store.put('pontoPin', { id: f.id, nome: f.nome, loja: f.loja, ativo: true, pedirPin: false }).catch(() => {});
     for (const p of Store.all('pontoPin')) {
-      const f = Func.get(p.id), alvo = f ? { nome: f.nome, loja: f.loja, ativo: f.status !== 'desligado', pedirPin: pedir } : { ativo: false, pedirPin: pedir };
+      const c = Store.cfg(), antes = c.pontoBloquearAntes === false ? null : Math.max(0, +c.pontoAntecedencia || 0), atr = Bat.atrasoMin();
+      const f = Func.get(p.id), alvo = f ? { nome: f.nome, loja: f.loja, ativo: f.status !== 'desligado', pedirPin: pedir, inicio: horaIni(f), antes, atraso: atr } : { ativo: false, pedirPin: pedir };
       if (Object.keys(alvo).some(k => p[k] !== alvo[k])) await Store.put('pontoPin', Object.assign({}, p, alvo)).catch(() => {});
     }
   }, 1500);
@@ -941,7 +944,7 @@ function vBatidas(pg) {
   const at = Func.ativos().filter(f => !S.loja || f.loja === S.loja), comPin = Func.ativos().filter(f => Bat.noTablet(f.id)).length;
   const head = `<div class="head"><div class="grow"><h1>Ponto do mês</h1><div class="sub">Batidas do tablet viram horas trabalhadas, extras e faltantes. Confira, ajuste e leve para o resumo do mês.</div></div>
     <select class="input" id="bt-mes" style="width:auto">${mesesPonto().map(m => `<option value="${m}" ${m === mes ? 'selected' : ''}>${Ponto.mesTxt(m)}</option>`).join('')}</select>
-    <button class="btn" id="bt-rf">${ico('refresh')} Atualizar</button>${Bat.pedirPin() ? `<button class="btn" id="bt-pin">${ico('user')} PINs</button>` : ''}</div>${pontoTabs()}`;
+    <button class="btn" id="bt-rf">${ico('refresh')} Atualizar</button><button class="btn" id="bt-ro">${ico('user')} Rostos</button>${Bat.pedirPin() ? `<button class="btn" id="bt-pin">${ico('user')} PINs</button>` : ''}</div>${pontoTabs()}`;
   if (!c) {
     pg.innerHTML = head + '<div class="empty">Buscando as batidas…</div>'; ligarBat(pg, mes);
     Bat.carregar(mes).then(() => { if (S.view === 'ponto' && (S.pTab || 'bat') === 'bat') App.render(); }).catch(e => { pg.innerHTML = head + `<div class="alert bad">Não consegui buscar as batidas: ${esc(e.code || e.message)}<br><span class="small">Confira se as regras de segurança foram publicadas (Configurações → Segurança do Firebase).</span></div>`; ligarBat(pg, mes); });
@@ -957,7 +960,7 @@ function vBatidas(pg) {
     <div class="row" style="margin-bottom:12px"><div class="chips grow">${[['', 'Todas as lojas'], ...Lojas.list().map(l => [l.id, Lojas.curto(l.id)])].map(([k, t]) => `<button data-fl="${k}" class="${(S.loja || '') === k ? 'on' : ''}">${esc(t)}</button>`).join('')}</div>
       <button class="btn" id="bt-pr">${ico('print')} Espelhos para assinar</button><button class="btn primary" id="bt-lv">${ico('check')} Levar para o resumo do mês</button></div>
     <table class="table"><thead><tr><th>Funcionário</th><th>Dias</th><th>Trabalhadas</th><th>Extras</th><th>Faltantes</th><th>Atenção</th></tr></thead><tbody>
-    ${linhas.map(({ f, r }) => { const t = r.tot, av = []; if (t.pend) av.push(`<span class="pill bad">${t.pend} ${t.pend === 1 ? 'dia' : 'dias'} sem par</span>`); if (t.semFoto) av.push(`<span class="pill warn">${t.semFoto} sem foto</span>`); if (t.atrasadas) av.push(`<span class="pill warn">${t.atrasadas} enviada${t.atrasadas > 1 ? 's' : ''} com atraso</span>`); if (!Bat.noTablet(f.id)) av.push(`<span class="pill">${Bat.pedirPin() ? 'sem PIN' : 'fora do tablet'}</span>`);
+    ${linhas.map(({ f, r }) => { const t = r.tot, av = []; if (t.pend) av.push(`<span class="pill bad">${t.pend} ${t.pend === 1 ? 'dia' : 'dias'} sem par</span>`); if (t.semFoto) av.push(`<span class="pill warn">${t.semFoto} sem foto</span>`); if (t.atrasadas) av.push(`<span class="pill warn">${t.atrasadas} enviada${t.atrasadas > 1 ? 's' : ''} com atraso</span>`); if (t.atrasos) av.push(`<span class="pill warn">${t.atrasos} ${t.atrasos === 1 ? 'atraso' : 'atrasos'}</span>`); if (t.conferir) av.push(`<span class="pill bad">${t.conferir} foto${t.conferir > 1 ? 's' : ''} para conferir</span>`); if (!temRosto(f.id)) av.push('<span class="pill">sem rosto</span>'); if (!Bat.noTablet(f.id)) av.push(`<span class="pill">${Bat.pedirPin() ? 'sem PIN' : 'fora do tablet'}</span>`);
       return `<tr class="click" data-bf="${f.id}"><td><b>${esc(f.nome)}</b><br><span class="muted small">${esc(f.cargo || '')} · ${esc(Lojas.curto(f.loja))} · jornada ${minH(r.jor)}</span></td><td>${t.dias}</td><td class="num">${minH(t.trab)}</td><td class="num">${t.extras ? minH(t.extras) : '–'}</td><td class="num">${t.faltantes ? minH(t.faltantes) : '–'}</td><td>${av.join(' ') || '<span class="pill ok">ok</span>'}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Nenhum funcionário ativo.</td></tr>'}
     </tbody></table>
     <p class="muted small">Clique em alguém para ver dia a dia, as fotos e ajustar. A batida da madrugada (antes das ${pad2(Bat.virada())}:00) conta para o dia anterior. Diferenças de até ${Bat.tolerancia()} min por dia não contam (CLT, art. 58). Quem bate só entrada e saída tem o intervalo descontado sozinho.${Bat.noturnaOn() ? ' Depois das 22h, cada 52min30s conta como 1 hora (hora noturna).' : ''}</p>`;
@@ -979,6 +982,7 @@ function ligarBat(pg, mes) {
   ligarPontoTabs(pg);
   $('#bt-mes', pg).onchange = e => { S.batMes = e.target.value; App.render(); };
   $('#bt-rf', pg).onclick = () => { delete Bat.cache[mes]; App.render(); };
+  $('#bt-ro', pg).onclick = () => listaRostos();
   const bp = $('#bt-pin', pg); if (bp) bp.onclick = () => gerarPins();
 }
 
@@ -988,13 +992,13 @@ function espelho(f, mes) {
   const desenhar = () => {
     const c = Bat.cache[mes]; if (!c) return;
     const r = Bat.calc(f, c.list, mes), hoje = D.hoje();
-    const chip = b => `<button class="btn sm ${b.desconsiderada ? 'ghost' : ''}" data-b="${b.id}" title="${b.origem === 'manual' ? 'Lançada à mão' : 'Tablet'}" style="${b.desconsiderada ? 'text-decoration:line-through;color:var(--mut)' : ''}">${hhmmT(b.at)}${b.origem === 'manual' ? ' ✎' : ''}${b.origem === 'tablet' && !b.foto ? ' ⚠' : ''}${Bat.atrasada(b) ? ' ⏱' : ''}${b.loja && b.loja !== f.loja ? ' · ' + esc(Lojas.curto(b.loja)) : ''}</button>`;
+    const chip = b => `<button class="btn sm ${b.desconsiderada ? 'ghost' : ''}" data-b="${b.id}" title="${b.origem === 'manual' ? 'Lançada à mão' : 'Tablet'}" style="${b.desconsiderada ? 'text-decoration:line-through;color:var(--mut)' : ''}">${hhmmT(b.at)}${b.origem === 'manual' ? ' ✎' : ''}${b.origem === 'tablet' && !b.foto ? ' ⚠' : ''}${conferirRosto(b) ? ' 👤' : ''}${Bat.atrasada(b) ? ' ⏱' : ''}${b.loja && b.loja !== f.loja ? ' · ' + esc(Lojas.curto(b.loja)) : ''}</button>`;
     m.el.querySelector('.mb').innerHTML = `
       <div class="kpis" style="margin:0"><div class="kpi"><span class="l">Dias</span><span class="v">${r.tot.dias}</span></div><div class="kpi"><span class="l">Trabalhadas</span><span class="v">${minH(r.tot.trab)}</span></div><div class="kpi"><span class="l">Extras</span><span class="v">${minH(r.tot.extras)}</span></div><div class="kpi"><span class="l">Faltantes</span><span class="v">${minH(r.tot.faltantes)}</span></div></div>
-      <p class="muted small" style="margin:0">Jornada de ${minH(r.jor)} por dia · intervalo descontado de ${r.itv} min quando só tem entrada e saída. Mude na ficha (Editar → Jornada no ponto). ✎ lançada à mão · ⚠ sem foto · ⏱ chegou com atraso (internet ou relógio do tablet).</p>
+      <p class="muted small" style="margin:0">Jornada de ${minH(r.jor)} por dia · intervalo descontado de ${r.itv} min quando só tem entrada e saída. Mude na ficha (Editar → Jornada no ponto). ✎ lançada à mão · ⚠ sem foto · 👤 rosto para conferir · ⏱ chegou com atraso (internet ou relógio do tablet).</p>
       <table class="table"><thead><tr><th>Dia</th><th>Batidas</th><th>Trabalhadas</th><th>Saldo</th><th></th></tr></thead><tbody>
       ${r.dias.filter(d => d.todas.length || d.dia <= hoje).map(d => `<tr><td class="num">${D.curto(d.dia)} <span class="muted small">${D.semana(d.dia).slice(0, 3)}</span></td><td><div class="row" style="gap:4px">${d.todas.map(chip).join('') || '<span class="muted small">sem batida</span>'}</div></td>
-        <td class="num">${d.pend ? '<span class="pill bad">falta uma batida</span>' : d.validas.length ? minH(d.trab) + (d.itv || d.not ? ` <span class="muted small">(${[d.itv ? '-' + d.itv + ' intervalo' : '', d.not ? '+' + d.not + ' noturno' : ''].filter(Boolean).join(', ')})</span>` : '') : ''}</td>
+        <td class="num">${d.atraso ? `<span class="pill warn" style="margin-right:4px">chegou ${d.atraso} min atrasado(a)</span>` : ''}${d.pend ? '<span class="pill bad">falta uma batida</span>' : d.validas.length ? minH(d.trab) + (d.itv || d.not ? ` <span class="muted small">(${[d.itv ? '-' + d.itv + ' intervalo' : '', d.not ? '+' + d.not + ' noturno' : ''].filter(Boolean).join(', ')})</span>` : '') : ''}</td>
         <td class="num">${d.pend || !d.validas.length ? '' : d.saldo > 0 ? `<span style="color:var(--acc);font-weight:600">+${minH(d.saldo)}</span>` : d.saldo < 0 ? `<span style="color:var(--bad);font-weight:600">-${minH(-d.saldo)}</span>` : '0:00'}</td>
         <td class="r"><button class="btn sm ghost" data-add="${d.dia}" title="Lançar batida à mão">${ico('plus')}</button></td></tr>`).join('')}</tbody></table>`;
     $$('[data-b]', m.el).forEach(b => b.onclick = () => verBatida(c.list.find(x => x.id === b.dataset.b), f, desenhar));
@@ -1007,8 +1011,9 @@ function espelho(f, mes) {
 }
 async function verBatida(b, f, depois) {
   if (!b) return;
-  const m = modal({ title: `Batida de ${hhmmT(b.at)} · ${D.fmt(Bat.dia(b.at))}`, body: `<div class="row" style="align-items:flex-start;flex-wrap:nowrap;gap:16px"><div id="vb-ft" style="width:150px;height:200px;border-radius:10px;background:#eef0ee;display:grid;place-items:center;flex:none;overflow:hidden" class="muted small">${b.foto ? 'Carregando foto…' : 'Sem foto'}</div>
-    <div class="col" style="gap:6px"><div><b>${esc(f.nome)}</b></div><div class="small">Horário registrado: <b>${fmtDT(b.at)}</b></div><div class="small">Loja: ${esc(Lojas.nome(b.loja))}</div>
+  const m = modal({ title: `Batida de ${hhmmT(b.at)} · ${D.fmt(Bat.dia(b.at))}`, body: `<div class="row" style="align-items:flex-start;flex-wrap:nowrap;gap:16px"><div class="col" style="gap:4px;flex:none;align-items:center"><div id="vb-ft" style="width:150px;height:200px;border-radius:10px;background:#eef0ee;display:grid;place-items:center;overflow:hidden" class="muted small">${b.foto ? 'Carregando foto…' : 'Sem foto'}</div><span class="muted small">batida</span></div>
+    ${Store.get('rostos', f.id) ? `<div class="col" style="gap:4px;flex:none;align-items:center"><img src="${Store.get('rostos', f.id).img}" alt="" style="width:150px;height:200px;border-radius:10px;object-fit:cover"><span class="muted small">cadastro</span></div>` : ''}
+    <div class="col" style="gap:6px"><div><b>${esc(f.nome)}</b></div><div class="small">Horário registrado: <b>${fmtDT(b.at)}</b></div><div class="small">Loja: ${esc(Lojas.nome(b.loja))}</div>${b.rosto ? `<div><span class="pill ${b.rosto === 'ok' ? 'ok' : conferirRosto(b) ? 'bad' : ''}">${esc(ROSTO_TXT[b.rosto] || b.rosto)}</span>${b.dist != null ? ` <span class="muted small">diferença ${String(b.dist).replace('.', ',')} (até ${String(Rosto.LIMITE).replace('.', ',')} confere)</span>` : ''}</div>` : ''}
     <div class="small">${b.origem === 'manual' ? `Lançada à mão por ${esc(b.by || '')}${b.motivo ? '<br>Motivo: ' + esc(b.motivo) : ''}` : 'Registrada no tablet'}</div>
     ${Bat.atrasada(b) ? `<div class="alert" style="padding:8px 10px"><span class="small">Chegou ao sistema em ${fmtDT(b.at)}, mas o tablet marcava ${fmtDT(b.atLocal)}. Pode ter ficado sem internet. Se precisar, desconsidere e lance o horário certo.</span></div>` : ''}
     ${b.desconsiderada ? `<div class="alert bad" style="padding:8px 10px"><span class="small">Desconsiderada${b.motivo ? ': ' + esc(b.motivo) : ''}${b.by ? ' · ' + esc(b.by) : ''}</span></div>` : ''}</div></div>`,
@@ -1043,7 +1048,7 @@ async function imprimirEspelhos(fs, mes) {
     return `<div class="pg">${cab(f.loja)}<h1>Espelho de ponto · ${Ponto.mesTxt(mes)}</h1>
       <div class="fg">${cel('Funcionário', f.nome, 3)}${cel('CPF', f.cpf, 1)}${cel('Cargo', f.cargo, 1)}${cel('Admissão', D.fmt(f.admissao), 1)}${cel('Horário', f.horario, 2)}${cel('Jornada diária', minH(r.jor), 2)}${cel('Intervalo', r.itv + ' min', 2)}</div>
       <table style="font-size:11px"><thead><tr><th>Dia</th><th>Marcações</th><th>Trabalhadas</th><th>Extras</th><th>Faltantes</th><th>Obs.</th></tr></thead><tbody>
-      ${r.dias.map(d => `<tr><td>${D.curto(d.dia)} ${D.semana(d.dia).slice(0, 3)}</td><td>${d.validas.map(b => hhmmT(b.at) + (b.origem === 'manual' ? '*' : '')).join(' · ') || '–'}</td><td>${d.validas.length && !d.pend ? minH(d.trab) : ''}</td><td>${d.saldo > 0 ? minH(d.saldo) : ''}</td><td>${d.saldo < 0 ? minH(-d.saldo) : ''}</td><td>${d.pend ? 'marcação incompleta' : [d.itv ? 'intervalo pré-assinalado' : '', d.not ? 'inclui ' + d.not + ' min de redução noturna' : ''].filter(Boolean).join('; ')}</td></tr>`).join('')}
+      ${r.dias.map(d => `<tr><td>${D.curto(d.dia)} ${D.semana(d.dia).slice(0, 3)}</td><td>${d.validas.map(b => hhmmT(b.at) + (b.origem === 'manual' ? '*' : '')).join(' · ') || '–'}</td><td>${d.validas.length && !d.pend ? minH(d.trab) : ''}</td><td>${d.saldo > 0 ? minH(d.saldo) : ''}</td><td>${d.saldo < 0 ? minH(-d.saldo) : ''}</td><td>${[d.atraso ? 'atraso de ' + d.atraso + ' min' : '', d.pend ? 'marcação incompleta' : '', !d.pend && d.itv ? 'intervalo pré-assinalado' : '', !d.pend && d.not ? 'inclui ' + d.not + ' min de redução noturna' : ''].filter(Boolean).join('; ')}</td></tr>`).join('')}
       <tr><th colspan="2">Total do mês</th><th>${minH(r.tot.trab)}</th><th>${minH(r.tot.extras)}</th><th>${minH(r.tot.faltantes)}</th><th></th></tr></tbody></table>
       <p style="font-size:11px">* marcação lançada pela gerência. Horários registrados no tablet da loja com o relógio do servidor e foto. Diferenças de até ${Bat.tolerancia()} minutos por dia desconsideradas (CLT, art. 58, §1º).${Bat.noturnaOn() ? ' Horas entre 22h e 5h contadas como hora noturna reduzida (CLT, art. 73).' : ''}</p>
       <p>Declaro que os horários acima correspondem à minha jornada de trabalho no mês de ${Ponto.mesTxt(mes)}.</p>
@@ -1107,7 +1112,7 @@ service cloud.firestore {
       allow create: if tablet()
         && request.resource.data.at == request.time
         && request.resource.data.origem == 'tablet'
-        && request.resource.data.keys().hasOnly(['funcId', 'nome', 'loja', 'at', 'atLocal', 'disp', 'origem', 'foto', 'v'])
+        && request.resource.data.keys().hasOnly(['funcId', 'nome', 'loja', 'at', 'atLocal', 'disp', 'origem', 'foto', 'rosto', 'dist', 'liberado', 'v'])
         && exists(/databases/$(database)/documents/pontoPin/$(request.resource.data.funcId));
     }
     match /batidaFotos/{id} {
@@ -1130,6 +1135,138 @@ service firebase.storage {
 }`;
 }
 async function copiarTexto(t, ok) { try { await navigator.clipboard.writeText(t); toast(ok); } catch (e) { const a = document.createElement('textarea'); a.value = t; document.body.appendChild(a); a.select(); document.execCommand('copy'); a.remove(); toast(ok); } }
+
+/* reconhecimento facial (mesmo código no DP X e no Ponto X) */
+const FACE_LIB = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js';
+const FACE_MODELOS = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/';
+const Rosto = {
+  estado: 'off', erro: null, _p: null, LIMITE: 0.55,
+  carregar() {
+    if (this._p) return this._p;
+    this.estado = 'carregando';
+    const p = new Promise((res, rej) => { if (window.faceapi) return res(); const s = document.createElement('script'); s.src = FACE_LIB; s.async = true; s.onload = () => res(); s.onerror = () => rej(new Error('Não consegui baixar o reconhecimento facial')); document.head.appendChild(s); })
+      .then(async () => {
+        if (faceapi.tf && faceapi.tf.ready) await faceapi.tf.ready();
+        const n = faceapi.nets; await n.tinyFaceDetector.load(FACE_MODELOS); await n.faceLandmark68Net.load(FACE_MODELOS); await n.faceRecognitionNet.load(FACE_MODELOS);
+        this.estado = 'pronto';
+      });
+    this._p = p.catch(e => { this.estado = 'erro'; this.erro = e; this._p = null; throw e; });
+    return this._p;
+  },
+  /* 128 números que descrevem o rosto, ou null se não achou rosto */
+  async descritor(canvas) {
+    const r = await faceapi.detectSingleFace(canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 })).withFaceLandmarks().withFaceDescriptor();
+    return r ? Array.from(r.descriptor) : null;
+  },
+  distancia(a, b) { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s); },
+  /* quadro inteiro da câmera, espelhado (igual ao que a pessoa vê) */
+  quadro(v) { const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; const g = c.getContext('2d'); g.translate(c.width, 0); g.scale(-1, 1); g.drawImage(v, 0, 0); return c; },
+  /* recorte 3x4 em JPEG; com carimbo de data/hora quando recebe as linhas */
+  recorte(q, w, h, linhas, qual = 0.66) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+    const alvo = w / h; let sw = q.width, sh = q.height, sx = 0, sy = 0;
+    if (q.width / q.height > alvo) { sw = q.height * alvo; sx = (q.width - sw) / 2; } else { sh = q.width / alvo; sy = (q.height - sh) / 2; }
+    g.drawImage(q, sx, sy, sw, sh, 0, 0, w, h);
+    if (linhas) {
+      g.fillStyle = 'rgba(0,0,0,.62)'; g.fillRect(0, h - 64, w, 64); g.fillStyle = '#fff'; g.textBaseline = 'alphabetic';
+      const caber = (t, px, bold) => { let s = px; do { g.font = `${bold ? 'bold ' : ''}${s}px system-ui, Arial, sans-serif`; s--; } while (g.measureText(t).width > w - 20 && s > 9); };
+      caber(linhas[0], 24, true); g.fillText(linhas[0], 10, h - 36);
+      caber(linhas[1], 14, false); g.fillText(linhas[1], 10, h - 14);
+    }
+    return c.toDataURL('image/jpeg', qual);
+  }
+};
+
+/* cadastro do rosto (só a gestão, logada no DP X) */
+const ROSTO_TXT = { ok: 'rosto confere', diferente: 'rosto não confere', 'sem rosto': 'rosto não apareceu na foto', 'sem cadastro': 'sem rosto cadastrado', indisponivel: 'reconhecimento indisponível na hora', 'sem foto': 'sem foto' };
+const conferirRosto = b => !b.desconsiderada && (b.rosto === 'diferente' || b.rosto === 'sem rosto');
+const temRosto = fid => { const p = Store.get('pontoPin', fid); return !!(p && Array.isArray(p.face)); };
+async function cadastrarRosto(f, depois) {
+  let stream = null, fechado = false;
+  const pri = esc(f.nome.split(' ')[0]);
+  const m = modal({ title: `Cadastrar rosto · ${pri}`, body: `<p style="margin:0">Peça para ${pri} ficar de frente para a câmera, sem boné, com o rosto iluminado. Dá para fazer no tablet da loja ou no celular, abrindo o DP X no navegador.</p>
+    <div style="width:260px;max-width:100%;aspect-ratio:3/4;border-radius:12px;overflow:hidden;background:#000;align-self:center"><video id="cr-v" playsinline muted autoplay style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"></video></div>
+    <p class="small" id="cr-st" style="margin:0;text-align:center">Abrindo a câmera…</p>`,
+    foot: '<button class="btn" data-x>Cancelar</button><button class="btn primary" id="cr-ok" disabled>Tirar foto e cadastrar</button>',
+    onClose: () => { fechado = true; if (stream) stream.getTracks().forEach(t => t.stop()); } });
+  const st = t => { const e = $('#cr-st', m.el); if (e) e.innerHTML = t; };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    if (fechado) return stream.getTracks().forEach(t => t.stop());
+    const v = $('#cr-v', m.el); v.srcObject = stream; await v.play();
+  } catch (e) { return st('<span style="color:var(--bad)">Não consegui abrir a câmera. Confira se o navegador tem permissão para usar a câmera.</span>'); }
+  st('Carregando o reconhecimento facial…');
+  let facial = true;
+  try { await Rosto.carregar(); st('Pronto. Com a pessoa de frente, toque em <b>Tirar foto e cadastrar</b>.'); }
+  catch (e) { facial = false; st('<span style="color:var(--warn)">O reconhecimento facial não carregou (confira a internet). Dá para salvar só a foto, para comparar as batidas a olho.</span>'); }
+  if (fechado) return;
+  const bt = $('#cr-ok', m.el); bt.disabled = false; if (!facial) bt.textContent = 'Salvar só a foto';
+  bt.onclick = async () => {
+    bt.disabled = true; const v = $('#cr-v', m.el), descs = []; let q0 = null;
+    for (let i = 0; i < 3; i++) {
+      st(`Tirando foto ${i + 1} de 3… fique parado(a)`); const q = Rosto.quadro(v); if (!q0) q0 = q;
+      if (facial) { try { const d = await Rosto.descritor(q); if (d) descs.push(d); } catch (e) { } }
+      await new Promise(r => setTimeout(r, 300));
+    }
+    if (facial && !descs.length) { bt.disabled = false; return st('<span style="color:var(--bad)">Não achei o rosto. Chegue mais perto, de frente e com luz no rosto, e tente de novo.</span>'); }
+    const media = descs.length ? descs[0].map((_, k) => Math.round(descs.reduce((a, d) => a + d[k], 0) / descs.length * 10000) / 10000) : null;
+    const img = Rosto.recorte(q0, 240, 320, null, 0.72);
+    const pp = Store.get('pontoPin', f.id) || { id: f.id, nome: f.nome, loja: f.loja, ativo: f.status !== 'desligado', pedirPin: Bat.pedirPin() };
+    const o = Object.assign({}, pp, { faceEm: D.hoje() }); if (media) o.face = media; else delete o.face;
+    try { await Store.put('rostos', { id: f.id, img, em: Date.now(), by: Store.quem() }); await Store.put('pontoPin', o); }
+    catch (e) { bt.disabled = false; return st('<span style="color:var(--bad)">Não consegui salvar: ' + esc(e.code || e.message) + '</span>'); }
+    m.close(); toast(media ? 'Rosto cadastrado' : 'Foto salva (sem reconhecimento)'); depois && depois();
+  };
+}
+function listaRostos() {
+  const desenhar = () => {
+    const fs = Func.ativos();
+    m.el.querySelector('.mb').innerHTML = `<p style="margin:0">O tablet compara a foto de cada batida com o rosto cadastrado aqui. Sem cadastro, a batida entra normalmente, mas sem conferência automática.</p>
+      <div class="grid g3" style="gap:10px">${fs.map(f => { const r = Store.get('rostos', f.id); return `<div class="card row" style="padding:10px;flex-wrap:nowrap"><div style="width:54px;height:72px;border-radius:8px;background:#eef0ee;overflow:hidden;flex:none;display:grid;place-items:center" class="muted small">${r ? `<img src="${r.img}" alt="" style="width:100%;height:100%;object-fit:cover">` : '?'}</div><div class="grow"><b>${esc(f.nome)}</b><br><span class="small ${temRosto(f.id) ? '' : 'muted'}">${temRosto(f.id) ? 'cadastrado' : r ? 'só foto' : 'sem cadastro'}</span></div><button class="btn sm ${temRosto(f.id) ? '' : 'primary'}" data-cr="${f.id}">${temRosto(f.id) ? 'Refazer' : 'Cadastrar'}</button></div>`; }).join('')}</div>`;
+    $$('[data-cr]', m.el).forEach(b => b.onclick = () => cadastrarRosto(Func.get(b.dataset.cr), desenhar));
+  };
+  const m = modal({ title: 'Rostos da equipe', wide: true, body: '', foot: '<button class="btn primary" data-x>Fechar</button>', onClose: () => App.render() });
+  desenhar();
+}
+
+/* horário de entrada da ficha ("17:05 às 01:00" → "17:05") */
+function horaIni(f) { const m = String((f && f.horario) || '').match(/(\d{1,2})[:h](\d{2})/); return m ? pad2(+m[1]) + ':' + m[2] : ''; }
+/* minutos de atraso da primeira batida do dia (null se não chegou atrasado) */
+function atrasoDe(f, dia, primeira) {
+  const ini = horaIni(f); if (!ini || !primeira) return null;
+  const [h, m] = ini.split(':').map(Number), esp = D.parse(dia); esp.setHours(h, m, 0, 0);
+  const min = Math.round((primeira - esp) / 60000);
+  return min > Bat.atrasoMin() && min < 240 ? min : null;
+}
+/* batidas de hoje ao vivo: avisa na tela (e no computador, se liberado) quando alguém chega atrasado */
+const PontoHoje = {
+  lista: [], unsub: null, avisados: new Set(),
+  iniciar() {
+    if (Store.mode !== 'live' || this.unsub) return;
+    const ini = new Date(); ini.setHours(Bat.virada(), 0, 0, 0); if (Date.now() < +ini) ini.setDate(ini.getDate() - 1);
+    let primeiro = true;
+    this.unsub = Store.db.collection('batidas').where('at', '>=', firebase.firestore.Timestamp.fromDate(ini)).onSnapshot(s => {
+      this.lista = []; s.forEach(d => { const x = d.data(); this.lista.push(Object.assign({}, x, { id: d.id, at: x.at && x.at.toMillis ? x.at.toMillis() : x.atLocal })); });
+      const novos = primeiro ? [] : s.docChanges().filter(c => c.type === 'added').map(c => c.doc.id); primeiro = false;
+      this.atrasos().forEach(a => { if (novos.includes(a.b.id) && !this.avisados.has(a.b.id)) { this.avisados.add(a.b.id); this.avisar(a); } });
+      if (S.view === 'inicio') App.render(true);
+    }, () => {});
+    setTimeout(() => { if (this.unsub) { this.unsub(); this.unsub = null; this.iniciar(); } }, 6 * 3600e3); /* troca de dia */
+  },
+  /* primeira batida de hoje de cada um, com atraso */
+  atrasos() {
+    const dia = Bat.dia(Date.now()), out = [], por = {};
+    this.lista.filter(b => !b.desconsiderada && Bat.dia(b.at) === dia).sort((a, b) => a.at - b.at).forEach(b => { if (!por[b.funcId]) por[b.funcId] = b; });
+    Object.values(por).forEach(b => { const f = Func.get(b.funcId); const min = f && atrasoDe(f, dia, b.at); if (min) out.push({ f, b, min }); });
+    return out.sort((a, b) => a.b.at - b.b.at);
+  },
+  presentes() { const dia = Bat.dia(Date.now()), c = {}; this.lista.filter(b => !b.desconsiderada && Bat.dia(b.at) === dia).forEach(b => c[b.funcId] = (c[b.funcId] || 0) + 1); return Object.entries(c).filter(([, n]) => n % 2 === 1).map(([id]) => Func.get(id)).filter(Boolean); },
+  avisar(a) {
+    const txt = `${a.f.nome.split(' ')[0]} chegou ${a.min} min atrasado(a) · ${hhmmT(a.b.at)} (entrada ${horaIni(a.f)})`;
+    toast('⏰ ' + txt, 'bad');
+    try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Atraso no ponto', { body: txt, icon: 'icon-192.png' }); } catch (e) { }
+  }
+};
 
 /* ======================= LIGAÇÃO COM O PEDIDO X E MINHA ÁREA ======================= */
 const PEDIDOX_CONFIG = { apiKey: 'AIzaSyBKGDZLO3hwAHGbUY4IIxeY0o_AQNzjo9Q', authDomain: 'pedido-x-9421f.firebaseapp.com', projectId: 'pedido-x-9421f', storageBucket: 'pedido-x-9421f.firebasestorage.app', messagingSenderId: '161578704022', appId: '1:161578704022:web:86b8c5ae97cfef6e27f6b7' };
@@ -1266,6 +1403,7 @@ const App = {
     try { await Store.init(); } catch (e) { this.root.innerHTML = `<div class="empty">Não consegui iniciar: ${esc(e.message)}</div>`; return; }
     if (!Store.user) return this.login();
     await Store.listen();
+    sincronizarPins(); PontoHoje.iniciar();
     Store.on(() => this.render(true)); Store.on(sincronizarPins);
     if (Store.mode === 'live') { let t; Store.on(() => { clearTimeout(t); t = setTimeout(() => Portal.publicarTodos(PX.dados).catch(() => {}), 20000); }); PX.init(); }
     window.addEventListener('hashchange', () => { this.fromHash(); this.render(); });
@@ -1311,11 +1449,13 @@ function vInicio(pg) {
   pg.innerHTML = `<div class="head"><div class="grow"><h1>${saud}!</h1><div class="sub">${D.semana(hoje)}, ${D.ext(hoje)}</div></div><button class="btn primary" id="i-new">${ico('plus')} Funcionário</button><button class="btn" id="i-ev">${ico('cal')} Evento</button></div>
     <div class="kpis"><div class="kpi"><span class="l">Ativos</span><span class="v">${at.length}</span><span class="muted small">${Lojas.list().map(l => `${esc(Lojas.curto(l.id))} ${at.filter(f => f.loja === l.id).length}`).join(' · ')}</span></div>
     <div class="kpi"><span class="l">Em experiência</span><span class="v">${exp}</span></div><div class="kpi"><span class="l">Aniversariantes do mês</span><span class="v">${anivs.length}</span></div><div class="kpi"><span class="l">Saídas no mês</span><span class="v">${saidas}</span></div></div>
+    ${Store.mode === 'live' ? (() => { const at = PontoHoje.atrasos(), pr = PontoHoje.presentes(); return `<div class="card col" style="margin-bottom:14px"><div class="row"><h2 class="grow">Ponto de hoje</h2><span class="muted small">${pr.length} ${pr.length === 1 ? 'pessoa trabalhando agora' : 'pessoas trabalhando agora'}</span>${'Notification' in window && Notification.permission !== 'granted' ? '<button class="btn sm" id="i-ntf">Avisar atrasos no computador</button>' : ''}<button class="btn sm" data-nav2="ponto">Ver batidas</button></div>${at.length ? `<div class="list">${at.map(a => `<div class="it"><span class="dot" style="background:var(--warn)"></span><span class="grow"><b>${esc(a.f.nome)}</b> chegou <b>${a.min} min atrasado(a)</b> · bateu ${hhmmT(a.b.at)}, entrada ${horaIni(a.f)} · ${esc(Lojas.curto(a.b.loja))}</span></div>`).join('')}</div>` : '<p class="muted small" style="margin:0">Nenhum atraso hoje.</p>'}</div>`; })() : ''}
     <div class="grid g2"><div class="card col"><h2>Avisos</h2>${av.length ? `<div class="list">${av.map((a, i) => `<div class="it"><span class="dot ${a.tipo === 'contrato' ? 'k-contrato' : a.tipo === 'exame' ? 'k-exame' : a.tipo === 'vaga' ? 'k-vaga' : 'k-adv'}"></span><span class="grow">${a.txt}</span>${a.tipo === 'contrato' ? `<button class="btn sm primary" data-av="${i}">Resolver</button>` : a.tipo === 'vaga' ? `<button class="btn sm" data-nav2="rec">Recrutar</button>` : `<button class="btn sm" data-fo="${a.f.id}">Abrir</button>`}</div>`).join('')}</div>` : '<p class="muted" style="margin:0">Nenhum aviso. Tudo em dia.</p>'}</div>
     <div class="card col"><h2>Próximos 7 dias</h2>${prox.length ? `<div class="list">${prox.map(e => `<div class="it"><span class="dot k-${e.kind}"></span><span class="num small" style="width:120px;flex:none">${D.curto(e.date)} ${D.semana(e.date).slice(0, 3)}${e.hora ? ' ' + esc(e.hora) : ''}</span><span class="grow">${esc(e.title)}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0">Nada nos próximos dias.</p>'}<button class="btn sm" style="align-self:flex-start" data-nav2="cal">Ver calendário</button></div>
     <div class="card col"><h2>Aniversariantes de ${MESES[+mes - 1]}</h2>${anivs.length ? `<div class="list">${anivs.map(f => `<div class="it"><div class="av">${iniciais(f.nome)}</div><span class="grow"><b>${esc(f.nome)}</b><br><span class="muted small">${D.curto(f.nascimento)} · ${D.idade(f.nascimento) + (f.nascimento.slice(5) >= hoje.slice(5) ? 1 : 0)} anos · ${esc(Lojas.curto(f.loja))}</span></span>${f.nascimento.slice(5) === hoje.slice(5) ? '<span class="pill ok">hoje!</span>' : ''}<button class="btn sm" data-pb="${f.id}" title="Mensagem de parabéns">${ico('wa')}</button></div>`).join('')}</div>` : '<p class="muted" style="margin:0">Ninguém faz aniversário este mês.</p>'}</div></div>`;
   $('#i-new', pg).onclick = () => editarFicha(null);
   $('#i-ev', pg).onclick = () => editarEvento(null, hoje);
+  const ntf = $('#i-ntf', pg); if (ntf) ntf.onclick = async () => { const r = await Notification.requestPermission(); toast(r === 'granted' ? 'Pronto: com o DP X aberto, o computador avisa quando alguém chegar atrasado' : 'O navegador não liberou as notificações', r === 'granted' ? '' : 'bad'); App.render(); };
   $$('[data-nav2]', pg).forEach(b => b.onclick = () => App.go(b.dataset.nav2));
   $$('[data-fo]', pg).forEach(b => b.onclick = () => App.go('func', b.dataset.fo));
   $$('[data-av]', pg).forEach(b => b.onclick = () => resolverContrato(av[+b.dataset.av].f));
@@ -1368,7 +1508,7 @@ function vFunc(pg) {
       <div class="files">${(f.anexos || []).slice().sort((a, b) => b.at - a.at).map(a => `<div class="f">${ico('file')}<span class="grow"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.nome)}</a><br><span class="muted small">${esc(a.cat || '')} · ${fmtDT(a.at)}</span></span><button class="btn sm danger" data-axd="${a.id}">${ico('trash')}</button></div>`).join('') || '<p class="empty">Nenhum arquivo anexado.</p>'}</div></div>`;
   if (S.tab === 'adv') body = `<div class="card col"><div class="row"><h2 class="grow">Advertências e suspensões</h2>${!desl ? `<button class="btn primary" id="a-new">${ico('plus')} Nova advertência</button>` : ''}</div>${advTabela(advs, false)}</div>`;
   if (S.tab === 'unif') body = `<div class="card col"><div class="row"><h2 class="grow">Uniformes entregues</h2>${!desl ? `<button class="btn primary" id="u-new">${ico('plus')} Entregar uniforme</button>` : ''}</div>${entregasTabela(ents, false)}</div>`;
-  if (S.tab === 'ponto') { const ps = Ponto.daPessoa(f.id), pp = Store.get('pontoPin', f.id); body = `<div class="card row" style="margin-bottom:14px"><div class="grow"><h2>Ponto no tablet</h2><p class="muted small" style="margin:4px 0 0">${!Bat.pedirPin() ? (Bat.noTablet(f.id) ? 'Aparece no tablet das lojas (sem PIN, com selfie).' : 'Vai aparecer no tablet em instantes.') : pp && pp.hash ? `Tem PIN desde ${D.fmt(pp.pinEm)}. Aparece no tablet das lojas.` : 'Ainda sem PIN — não aparece no tablet.'} Jornada ${minH(Bat.jornada(f))} por dia, intervalo de ${Bat.intervalo(f)} min.</p></div>${Bat.pedirPin() ? `<button class="btn" id="pn-def">${pp && pp.hash ? 'Trocar PIN' : 'Definir PIN'}</button>` : ''}<button class="btn primary" id="pn-bat">${ico('clock')} Batidas do mês</button></div><div class="card col"><div class="row"><h2 class="grow">Ponto mês a mês</h2><button class="btn sm" id="pt-go">Lançar no Ponto do mês</button></div><table class="table"><thead><tr><th>Mês</th><th>Horas extras</th><th>Valor</th><th>Horas faltantes</th><th>Faltas sem justif.</th><th>Com atestado</th><th>Voucher</th><th>Obs.</th></tr></thead><tbody>${ps.map(p => `<tr><td style="text-transform:capitalize">${Ponto.mesTxt(p.mes)}</td><td>${fmtH(p.extras)}</td><td>${p.extrasValor ? brl(p.extrasValor) : '–'}</td><td>${fmtH(p.faltantes)}</td><td>${p.faltasInj || 0}</td><td>${p.faltasJust || 0}</td><td>${Ponto.voucher(p) ? '<span class="pill ok">tem direito</span>' : '<span class="pill bad">não</span>'}</td><td class="small">${esc(p.obs || '')}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nada lançado ainda.</td></tr>'}</tbody></table></div>`; }
+  if (S.tab === 'ponto') { const ps = Ponto.daPessoa(f.id), pp = Store.get('pontoPin', f.id); body = `<div class="card row" style="margin-bottom:14px">${Store.get('rostos', f.id) ? `<img src="${Store.get('rostos', f.id).img}" alt="" style="width:54px;height:72px;border-radius:8px;object-fit:cover">` : ''}<div class="grow"><h2>Ponto no tablet</h2><p class="muted small" style="margin:4px 0 0">${!Bat.pedirPin() ? (Bat.noTablet(f.id) ? 'Aparece no tablet das lojas.' : 'Vai aparecer no tablet em instantes.') + (temRosto(f.id) ? ` Rosto cadastrado em ${D.fmt((Store.get('pontoPin', f.id) || {}).faceEm)}.` : ' Rosto ainda não cadastrado.') : pp && pp.hash ? `Tem PIN desde ${D.fmt(pp.pinEm)}. Aparece no tablet das lojas.` : 'Ainda sem PIN — não aparece no tablet.'} Jornada ${minH(Bat.jornada(f))} por dia, intervalo de ${Bat.intervalo(f)} min.</p></div>${Bat.pedirPin() ? `<button class="btn" id="pn-def">${pp && pp.hash ? 'Trocar PIN' : 'Definir PIN'}</button>` : ''}<button class="btn" id="pn-ros">${temRosto(f.id) ? 'Refazer rosto' : 'Cadastrar rosto'}</button><button class="btn primary" id="pn-bat">${ico('clock')} Batidas do mês</button></div><div class="card col"><div class="row"><h2 class="grow">Ponto mês a mês</h2><button class="btn sm" id="pt-go">Lançar no Ponto do mês</button></div><table class="table"><thead><tr><th>Mês</th><th>Horas extras</th><th>Valor</th><th>Horas faltantes</th><th>Faltas sem justif.</th><th>Com atestado</th><th>Voucher</th><th>Obs.</th></tr></thead><tbody>${ps.map(p => `<tr><td style="text-transform:capitalize">${Ponto.mesTxt(p.mes)}</td><td>${fmtH(p.extras)}</td><td>${p.extrasValor ? brl(p.extrasValor) : '–'}</td><td>${fmtH(p.faltantes)}</td><td>${p.faltasInj || 0}</td><td>${p.faltasJust || 0}</td><td>${Ponto.voucher(p) ? '<span class="pill ok">tem direito</span>' : '<span class="pill bad">não</span>'}</td><td class="small">${esc(p.obs || '')}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nada lançado ainda.</td></tr>'}</tbody></table></div>`; }
   if (S.tab === 'consumo') {
     if (!PX.ligado() || !PX.dados) body = `<div class="card muted">${PX.ligado() ? 'Buscando no Pedido X… clique em Configurações → Atualizar agora se demorar.' : 'Ligue ao Pedido X em Configurações para ver o consumo e o voucher aqui.'}</div>`;
     else { const r = Portal.resumo(f, PX.dados), v = r.voucher || { saldo: 0, itens: [] };
@@ -1401,7 +1541,7 @@ function vFunc(pg) {
   const on = (id, fn) => { const e = $(id, pg); if (e) e.onclick = fn; };
   on('#c-ren', () => renovar(f)); on('#c-efe', () => efetivar(f)); on('#c-enc', () => desligar(f, 'Término do contrato de experiência'));
   on('#c-volta', async () => { if (await confirmar('Voltar o contrato para experiência?')) Store.put('funcionarios', Object.assign({}, f, { contratoStatus: f.renovadoEm ? 'renovado' : 'exp1', efetivadoEm: '' })); });
-  on('#c-pr', () => imprimirDoc('prorrogacao', f)); on('#pt-go', () => { S.pTab = 'res'; App.go('ponto'); }); on('#pn-def', () => definirPin(f)); on('#pn-bat', () => espelho(f, D.hoje().slice(0, 7))); on('#fma', () => f.portalUid ? Portal.instrucoes(f) : Portal.criarAcesso(f)); on('#a-new', () => novaAdvertencia(f.id)); on('#u-new', () => entregarUniforme(f.id));
+  on('#c-pr', () => imprimirDoc('prorrogacao', f)); on('#pt-go', () => { S.pTab = 'res'; App.go('ponto'); }); on('#pn-def', () => definirPin(f)); on('#pn-bat', () => espelho(f, D.hoje().slice(0, 7))); on('#pn-ros', () => cadastrarRosto(f)); on('#fma', () => f.portalUid ? Portal.instrucoes(f) : Portal.criarAcesso(f)); on('#a-new', () => novaAdvertencia(f.id)); on('#u-new', () => entregarUniforme(f.id));
   const ax = $('#ax-f', pg); if (ax) ax.onchange = () => anexar(f, [...ax.files], $('#ax-cat', pg).value);
   $$('[data-axd]', pg).forEach(b => b.onclick = async () => { const a = (f.anexos || []).find(x => x.id === b.dataset.axd); if (!a || !(await confirmar(`Apagar o arquivo "${esc(a.nome)}"?`, { ok: 'Apagar', perigo: true }))) return; await Store.apagarArquivo(a); Store.put('funcionarios', Object.assign({}, f, { anexos: f.anexos.filter(x => x.id !== a.id) })); });
   ligarTabelas(pg);
@@ -1702,11 +1842,13 @@ function vCfg(pg) {
     <div class="card"><h2>Cargos</h2>${F('Um por linha', 'cargosTxt', c.cargos.join('\n'), { type: 'area' })}</div>
     <div class="card"><h2>Motivos de advertência</h2><p class="muted small">O nome aparece na lista para marcar; o texto entra no documento, depois de "o(a) funcionário(a)…".</p><div id="cf-mo" class="col" style="gap:8px">${c.motivosAdv.map((mo, i) => `<div class="row" style="flex-wrap:nowrap;align-items:flex-start"><input class="input" data-mn="${i}" value="${esc(mo.nome)}" style="max-width:300px"><textarea class="input" data-mt="${i}" style="min-height:38px">${esc(mo.texto)}</textarea><button class="btn sm ghost" data-mx="${i}">×</button></div>`).join('')}</div><button class="btn sm" id="cf-madd" style="margin-top:8px">${ico('plus')} Motivo</button></div>
     <div class="card col"><h2>Ponto no tablet (Ponto X)</h2>
-      <p class="muted small" style="margin:0">Cada loja tem um tablet com o link abaixo. O funcionário toca no nome${c.pontoPedirPin !== false ? ', digita o PIN' : ''} e o tablet tira uma selfie. As batidas aparecem em Ponto do mês.</p>
+      <p class="muted small" style="margin:0">Cada loja tem um tablet com o link abaixo. O funcionário toca no nome${c.pontoPedirPin === true ? ', digita o PIN' : ''} e a câmera abre na hora: a foto sai com data e horário gravados e é comparada com o rosto cadastrado (Ponto do mês → Rostos). As batidas aparecem em Ponto do mês.</p>
       <div class="row"><span class="pill ${c.tabletCriado ? 'ok' : ''}">${c.tabletCriado ? 'senha do tablet criada em ' + D.fmt(c.tabletCriado) : 'senha do tablet não criada'}</span><button class="btn sm" id="tb-ac">${c.tabletCriado ? 'Trocar a senha do tablet' : 'Criar a senha do tablet'}</button><button class="btn sm" id="tb-lk">${ico('link')} Copiar o link do tablet</button></div>
       <p class="small" style="margin:0">Link: <b>${esc(location.href.replace(/[#?].*$/, '').replace(/index\.html$/, '').replace(/\/?$/, '/'))}ponto.html</b></p>
       <div class="fgrid">${F('Jornada por dia (padrão)', 'pontoJornada', c.pontoJornada, { ph: '7:20' })}${F('Intervalo pré-assinalado (min)', 'pontoIntervalo', c.pontoIntervalo, { type: 'number' })}${F('Tolerância por dia (min)', 'pontoTolerancia', c.pontoTolerancia, { type: 'number' })}${F('O dia vira às (hora)', 'pontoVirada', c.pontoVirada, { type: 'number' })}</div>
-      <label class="check"><input type="checkbox" data-k="pontoPedirPin" ${c.pontoPedirPin !== false ? 'checked' : ''}><span><b>Pedir PIN</b> no tablet. Desmarcado: a pessoa toca no nome e o tablet tira a selfie direto — a foto é o que confirma quem bateu.</span></label>
+      <label class="check"><input type="checkbox" data-k="pontoBloquearAntes" ${c.pontoBloquearAntes !== false ? 'checked' : ''}><span><b>Não deixar bater o ponto muito antes do horário</b> de entrada que está na ficha de cada um (campo Horário). Ex.: entrada 17:05 e 5 min → libera a partir das 17:00.</span></label>
+      <div class="fgrid">${F('Libera quantos min antes da entrada', 'pontoAntecedencia', c.pontoAntecedencia ?? 5, { type: 'number' })}${F('Atraso: conta depois de quantos min', 'pontoAtraso', c.pontoAtraso ?? 5, { type: 'number' })}</div>
+      <label class="check"><input type="checkbox" data-k="pontoPedirPin" ${c.pontoPedirPin === true ? 'checked' : ''}><span><b>Pedir PIN</b> no tablet. Desmarcado: a pessoa toca no nome e o tablet tira a selfie direto — a foto é o que confirma quem bateu.</span></label>
       <label class="check"><input type="checkbox" data-k="portalPonto" ${c.portalPonto !== false ? 'checked' : ''}><span>Mostrar o <b>ponto</b> (horas extras, faltantes, faltas) para o funcionário na <b>Minha área</b></span></label>
       <label class="check"><input type="checkbox" data-k="pontoNoturna" ${c.pontoNoturna !== false ? 'checked' : ''}><span>Contar a <b>hora noturna reduzida</b>: entre 22h e 5h, cada 52min30s vale 1 hora (CLT, art. 73)</span></label>
       <p class="muted small" style="margin:0">Jornada e intervalo podem ser diferentes para cada pessoa, na ficha. O intervalo só é descontado quando a pessoa bate apenas entrada e saída e trabalhou mais de 6h. Batidas antes da hora da virada contam para o dia anterior (turno até 01:00).</p></div>
@@ -1721,7 +1863,7 @@ function vCfg(pg) {
   const ler = () => {
     const o = JSON.parse(JSON.stringify(c)); $$('[data-k]', pg).forEach(i => { if (i.dataset.k === 'cargosTxt') o.cargos = i.value.split('\n').map(s => s.trim()).filter(Boolean); else if (i.dataset.k === 'gestoresTxt') o.gestores = i.value.split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(x => x.includes('@')); else setDeep(o, i.dataset.k, i.type === 'checkbox' ? i.checked : i.value.trim()); });
     o.exp1 = +o.exp1 || 30; o.exp2 = +o.exp2 || 60; o.avisoDias = Math.max(0, +o.avisoDias || 0); ['valorTeste', 'valorExameAdm', 'valorExameDem'].forEach(k => o[k] = num(o[k])); o.diasTeste = Math.max(1, +o.diasTeste || 3);
-    o.pontoJornada = o.pontoJornada || '7:20'; o.pontoIntervalo = Math.max(0, +o.pontoIntervalo || 0); o.pontoTolerancia = Math.max(0, Math.min(10, +o.pontoTolerancia || 0)); o.pontoVirada = Math.max(0, Math.min(10, +o.pontoVirada || 0));
+    o.pontoJornada = o.pontoJornada || '7:20'; o.pontoIntervalo = Math.max(0, +o.pontoIntervalo || 0); o.pontoTolerancia = Math.max(0, Math.min(10, +o.pontoTolerancia || 0)); o.pontoVirada = Math.max(0, Math.min(10, +o.pontoVirada || 0)); o.pontoAntecedencia = Math.max(0, Math.min(120, +o.pontoAntecedencia || 0)); o.pontoAtraso = Math.max(0, Math.min(60, +o.pontoAtraso || 0));
     o.feriadosLocais = $$('[data-fd]', pg).map(i => { const n = +i.dataset.fd, [dd, mm] = i.value.split('/').map(s => s.trim()); return { md: dd && mm ? `${pad2(+mm)}-${pad2(+dd)}` : '', nome: $(`[data-fn="${n}"]`, pg).value.trim(), loja: $(`[data-fl="${n}"]`, pg).value }; }).filter(h => h.nome);
     o.motivosAdv = $$('[data-mn]', pg).map(i => { const n = +i.dataset.mn, ant = c.motivosAdv[n]; return { id: ant ? ant.id : uid(), nome: i.value.trim(), texto: $(`[data-mt="${n}"]`, pg).value.trim() }; }).filter(x => x.nome);
     return o;
