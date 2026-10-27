@@ -97,7 +97,7 @@ a.btn{color:var(--ink);text-decoration:none}
 .pv-ov{position:fixed;inset:0;z-index:80;background:#e9ece9;display:flex;flex-direction:column}.pv-bar{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#121614;color:#fff}.pv-bar .btn:not(.primary){color:var(--ink)}.pv-fr{flex:1;border:0;width:100%;background:#e9ece9}
 </style></head>
 <body><div id="app"></div><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script><script src="config.js"></script><script>/* DP X · Departamento pessoal do Xis da Gaúcha — núcleo */
-const APP_VERSION = '1.11.1';
+const APP_VERSION = '1.13.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -877,6 +877,7 @@ const Bat = {
       if (r.atraso) { tot.atrasos++; tot.minAtraso += r.atraso; }
       r.semReg = !v.length && dia < hoje && (!f.admissao || dia >= f.admissao) && trabalha.includes(D.parse(dia).getDay()); if (r.semReg) tot.semReg++;
       tot.manuais += v.filter(b => b.origem === 'manual').length;
+      r.fora = v.filter(b => foraDoHorario(f, dia, b.at)).map(b => b.id); tot.fora = (tot.fora || 0) + r.fora.length;
       r.intv = 0; if (v.length >= 4 && v.length % 2 === 0) { for (let k = 1; k < v.length - 1; k += 2) r.intv += (v[k + 1].at - v[k].at) / 60000; r.intv = Math.round(r.intv); tot.intv += r.intv; }
       if (v.length) {
         tot.dias++;
@@ -1010,7 +1011,7 @@ function vBatidas(pg) {
     <div class="row" style="margin-bottom:12px"><div class="chips grow">${[['', 'Todas as lojas'], ...Lojas.list().map(l => [l.id, Lojas.curto(l.id)])].map(([k, t]) => `<button data-fl="${k}" class="${(S.loja || '') === k ? 'on' : ''}">${esc(t)}</button>`).join('')}</div>
       <button class="btn" id="bt-pr">${ico('print')} Espelhos para assinar</button><button class="btn primary" id="bt-lv">${ico('check')} Levar para o resumo do mês</button></div>
     <table class="table"><thead><tr><th>Funcionário</th><th>Dias</th><th>Trabalhadas</th><th>Extras</th><th>Faltantes</th><th>Atenção</th></tr></thead><tbody>
-    ${linhas.map(({ f, r }) => { const t = r.tot, av = []; if (t.pend) av.push(`<span class="pill bad">${t.pend} ${t.pend === 1 ? 'dia' : 'dias'} sem par</span>`); if (t.semFoto) av.push(`<span class="pill warn">${t.semFoto} sem foto</span>`); if (t.atrasadas) av.push(`<span class="pill warn">${t.atrasadas} enviada${t.atrasadas > 1 ? 's' : ''} com atraso</span>`); if (t.atrasos) av.push(`<span class="pill warn">${t.atrasos} ${t.atrasos === 1 ? 'atraso' : 'atrasos'}</span>`); if (t.conferir) av.push(`<span class="pill bad">${t.conferir} foto${t.conferir > 1 ? 's' : ''} para conferir</span>`); if (!temRosto(f.id)) av.push('<span class="pill">sem rosto</span>'); if (!Bat.noTablet(f.id)) av.push(`<span class="pill">${Bat.pedirPin() ? 'sem PIN' : 'fora do tablet'}</span>`);
+    ${linhas.map(({ f, r }) => { const t = r.tot, av = []; if (t.pend) av.push(`<span class="pill bad">${t.pend} ${t.pend === 1 ? 'dia' : 'dias'} sem par</span>`); if (t.semFoto) av.push(`<span class="pill warn">${t.semFoto} sem foto</span>`); if (t.atrasadas) av.push(`<span class="pill warn">${t.atrasadas} enviada${t.atrasadas > 1 ? 's' : ''} com atraso</span>`); if (t.fora) av.push(`<span class="pill bad">${t.fora} fora do horário</span>`); if (t.atrasos) av.push(`<span class="pill warn">${t.atrasos} ${t.atrasos === 1 ? 'atraso' : 'atrasos'}</span>`); if (t.conferir) av.push(`<span class="pill bad">${t.conferir} foto${t.conferir > 1 ? 's' : ''} para conferir</span>`); if (!temRosto(f.id)) av.push('<span class="pill">sem rosto</span>'); if (!Bat.noTablet(f.id)) av.push(`<span class="pill">${Bat.pedirPin() ? 'sem PIN' : 'fora do tablet'}</span>`);
       return `<tr class="click" data-bf="${f.id}"><td><b>${esc(f.nome)}</b><br><span class="muted small">${esc(f.cargo || '')} · ${esc(Lojas.curto(f.loja))} · jornada ${minH(r.jor)}</span></td><td>${t.dias}</td><td class="num">${minH(t.trab)}</td><td class="num">${t.extras ? minH(t.extras) : '–'}</td><td class="num">${t.faltantes ? minH(t.faltantes) : '–'}</td><td>${av.join(' ') || '<span class="pill ok">ok</span>'}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Nenhum funcionário ativo.</td></tr>'}
     </tbody></table>
     <p class="muted small">Clique em alguém para ver dia a dia, as fotos e ajustar. A batida da madrugada (antes das ${pad2(Bat.virada())}:00) conta para o dia anterior. Diferenças de até ${Bat.tolerancia()} min por dia não contam (CLT, art. 58). Quem bate só entrada e saída tem o intervalo descontado sozinho.${Bat.noturnaOn() ? ' Depois das 22h, cada 52min30s conta como 1 hora (hora noturna).' : ''}</p>`;
@@ -1046,10 +1047,10 @@ function espelho(f, mes) {
   const desenhar = () => {
     const c = Bat.cache[mes]; if (!c) return;
     const r = Bat.calc(f, c.list, mes), hoje = D.hoje();
-    const chip = (b, d) => { const k = d.validas.indexOf(b), rot = b.desconsiderada ? 'desconsiderada' : Bat.rotulo(k, d.validas.length), ass = b.origem === 'manual' ? manualDoc(b) : null; return `<button class="btn sm ${b.desconsiderada ? 'ghost' : ''}" data-b="${b.id}" title="${b.origem === 'manual' ? 'Lançada à mão' : 'Tablet'}" style="flex-direction:column;gap:0;line-height:1.15;padding:4px 9px;${b.desconsiderada ? 'text-decoration:line-through;color:var(--mut)' : ''}"><span style="font-size:10px;font-weight:500;color:var(--mut)">${rot}${ass ? (ass.assinado ? ' · assinado' : ' · falta assinar') : ''}</span><span>${hhmmT(b.at)}${b.origem === 'manual' ? ' ✎' : ''}${b.origem === 'tablet' && !b.foto ? ' ⚠' : ''}${conferirRosto(b) ? ' 👤' : ''}${Bat.atrasada(b) ? ' ⏱' : ''}${b.loja && b.loja !== f.loja ? ' · ' + esc(Lojas.curto(b.loja)) : ''}</span></button>`; };
+    const chip = (b, d) => { const k = d.validas.indexOf(b), rot = b.desconsiderada ? 'desconsiderada' : Bat.rotulo(k, d.validas.length), ass = b.origem === 'manual' ? manualDoc(b) : null; return `<button class="btn sm ${b.desconsiderada ? 'ghost' : ''}" data-b="${b.id}" title="${b.origem === 'manual' ? 'Lançada à mão' : 'Tablet'}" style="flex-direction:column;gap:0;line-height:1.15;padding:4px 9px;${b.desconsiderada ? 'text-decoration:line-through;color:var(--mut)' : ''}"><span style="font-size:10px;font-weight:500;color:var(--mut)">${rot}${ass ? (ass.assinado ? ' · assinado' : ' · falta assinar') : ''}</span><span>${hhmmT(b.at)}${b.origem === 'manual' ? ' ✎' : ''}${b.origem === 'tablet' && !b.foto ? ' ⚠' : ''}${conferirRosto(b) ? ' 👤' : ''}${d.fora && d.fora.includes(b.id) ? ' <span style="color:var(--bad)">●</span>' : ''}${Bat.atrasada(b) ? ' ⏱' : ''}${b.loja && b.loja !== f.loja ? ' · ' + esc(Lojas.curto(b.loja)) : ''}</span></button>`; };
     m.el.querySelector('.mb').innerHTML = `
       <div class="kpis" style="margin:0"><div class="kpi"><span class="l">Dias</span><span class="v">${r.tot.dias}</span></div><div class="kpi"><span class="l">Trabalhadas</span><span class="v">${minH(r.tot.trab)}</span></div><div class="kpi"><span class="l">Extras</span><span class="v">${minH(r.tot.extras)}</span></div><div class="kpi"><span class="l">Faltantes</span><span class="v">${minH(r.tot.faltantes)}</span></div></div>
-      <p class="muted small" style="margin:0">Jornada de ${minH(r.jor)} por dia (domingo ${minH(Bat.jornada(f, '2026-11-01'))}, com ${Bat.intervalo(f, '2026-11-01')} min de intervalo) — calculada pelo horário da ficha. Quando só tem entrada e saída, o intervalo é descontado sozinho. As marcações entre a entrada e a saída são entendidas como intervalo (um de 1h ou dois de 30 min). ✎ lançada à mão · ⚠ sem foto · 👤 rosto para conferir · ⏱ chegou com atraso (internet ou relógio do tablet).</p>
+      <p class="muted small" style="margin:0">Jornada de ${minH(r.jor)} por dia (domingo ${minH(Bat.jornada(f, '2026-11-01'))}, com ${Bat.intervalo(f, '2026-11-01')} min de intervalo) — calculada pelo horário da ficha. Quando só tem entrada e saída, o intervalo é descontado sozinho. As marcações entre a entrada e a saída são entendidas como intervalo (um de 1h ou dois de 30 min). <span style="color:var(--bad)">●</span> fora do horário · ✎ lançada à mão · ⚠ sem foto · 👤 rosto para conferir · ⏱ chegou com atraso (internet ou relógio do tablet).</p>
       <table class="table"><thead><tr><th>Dia</th><th>Batidas</th><th>Trabalhadas</th><th>Saldo</th><th></th></tr></thead><tbody>
       ${r.dias.filter(d => d.todas.length || d.dia <= hoje).map(d => `<tr><td class="num">${D.curto(d.dia)} <span class="muted small">${D.semana(d.dia).slice(0, 3)}</span></td><td><div class="row" style="gap:4px">${d.todas.map(b => chip(b, d)).join('') || `<span class="muted small">${d.semReg ? 'sem batida (folga?)' : 'sem batida'}</span>`}</div></td>
         <td class="num">${d.atraso ? `<span class="pill warn" style="margin-right:4px">chegou ${d.atraso} min atrasado(a)</span>` : ''}${d.pend ? '<span class="pill bad">falta uma batida</span>' : d.validas.length ? minH(d.trab) + (d.itv || d.not || d.intv ? ` <span class="muted small">(${[d.intv ? 'intervalo ' + minH(d.intv) : '', d.itv ? '-' + d.itv + ' intervalo' : '', d.not ? '+' + d.not + ' noturno' : ''].filter(Boolean).join(', ')})</span>` : '') : ''}</td>
@@ -1137,16 +1138,36 @@ async function imprimirEspelhos(fs, mes, faixa, soPaginas) {
   imprimir('Espelho de ponto ' + per, pags);
 }
 
-/* escolher o turno de cada funcionário de uma vez */
+/* escala atual da equipe (pré-cadastro): nome → turno */
+const ESCALA_PADRAO = { manha: ['leonardo', 'anderson', 'gonzalo'], manha1010: ['laiane'], noite: ['denize', 'kelli', 'regian', 'ruan', 'luciano', 'guilherme', 'weslen', 'emily', 'emilly', 'robson', 'rafael', 'fabiana'] };
+function sugestaoTurno(f) {
+  const ts = Store.cfg().turnos || [], partes = norm(f.nome).split(/\s+/), primeiro = partes[0];
+  const achar = teste => Object.entries(ESCALA_PADRAO).find(([id, nomes]) => ts.some(t => t.id === id) && nomes.some(teste));
+  const r = achar(n => n === primeiro) || achar(n => partes.includes(n));
+  return r ? r[0] : '';
+}
+/* escolher o turno de cada funcionário com um clique */
 function horariosEquipe() {
   const desenhar = () => {
-    const ts = Store.cfg().turnos || [], fs = Func.ativos();
-    m.el.querySelector('.mb').innerHTML = `<p style="margin:0">O turno define o horário de entrada (para o bloqueio e o atraso), a saída e o intervalo. Domingo é igual para todos (${esc(Store.cfg().pontoDomHorario || '')}). Os turnos são editados em Configurações → Ponto no tablet.</p>
-      <table class="table"><thead><tr><th>Funcionário</th><th>Turno</th><th>Horário</th></tr></thead><tbody>${fs.map(f => `<tr><td><b>${esc(f.nome)}</b><br><span class="muted small">${esc(f.cargo || '')}</span></td>
-        <td><select class="input" data-ht="${f.id}" style="min-width:190px"><option value="">Personalizado</option>${ts.map(t => `<option value="${t.id}" ${f.turno === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></td>
-        <td>${turnoDe(f) ? `<span class="num">${esc(turnoDe(f).horario)}</span> <span class="muted small">· ${turnoDe(f).intervalo} min</span>` : `<input class="input" data-hh="${f.id}" value="${esc(f.horario || '')}" placeholder="Ex.: 10:10 às 17:30" style="max-width:170px">`}</td></tr>`).join('')}</tbody></table>`;
-    $$('[data-ht]', m.el).forEach(sel => sel.onchange = async () => { const f = Func.get(sel.dataset.ht), t = ts.find(x => x.id === sel.value); await Store.put('funcionarios', Object.assign({}, f, { turno: sel.value, horario: t ? t.horario : f.horario })); toast('Turno salvo'); desenhar(); });
+    const ts = Store.cfg().turnos || [], fs = Func.ativos(), sem = fs.filter(f => !f.turno && sugestaoTurno(f));
+    m.el.querySelector('.mb').innerHTML = `<p style="margin:0">Toque no turno de cada pessoa — já salva. Domingo é igual para todos (${esc(Store.cfg().pontoDomHorario || '')}). Os turnos são editados em Configurações → Ponto no tablet.</p>
+      ${sem.length ? `<div class="alert info"><span class="grow"><b>${sem.length}</b> ${sem.length === 1 ? 'pessoa ainda sem turno pode' : 'pessoas ainda sem turno podem'} ser preenchidas pela escala atual (manhã: Leonardo, Anderson, Gonzalo · Laiane 10:10 · noite: o restante).</span><button class="btn sm primary" id="he-auto">Preencher pela escala</button></div>` : ''}
+      <table class="table"><thead><tr><th>Funcionário</th><th>Turno</th></tr></thead><tbody>${fs.map(f => { const t = turnoDe(f); return `<tr><td><b>${esc(f.nome)}</b><br><span class="muted small">${esc(f.cargo || '')}${t ? ` · <span class="num">${esc(t.horario)}</span>` : f.horario ? ` · ${esc(f.horario)}` : ' · <span style="color:var(--bad)">sem horário</span>'}</span></td>
+        <td><div class="chips">${ts.map(x => `<button data-ht="${f.id}" data-tid="${x.id}" class="${f.turno === x.id ? 'on' : ''}" title="${esc(x.horario)}">${esc(x.nome)}</button>`).join('')}<button data-ht="${f.id}" data-tid="" class="${!f.turno && f.horario ? 'on' : ''}">Outro</button></div>
+        ${!t && f.horario ? `<input class="input" data-hh="${f.id}" value="${esc(f.horario || '')}" placeholder="Ex.: 10:10 às 17:30" style="max-width:190px;margin-top:6px">` : ''}</td></tr>`; }).join('')}</tbody></table>`;
+    $$('[data-ht]', m.el).forEach(b => b.onclick = async () => {
+      const f = Func.get(b.dataset.ht), t = ts.find(x => x.id === b.dataset.tid);
+      if (!t) { const h = prompt(`Horário de ${f.nome.split(' ')[0]} (ex.: 10:10 às 17:30)`, f.horario || ''); if (h == null) return; await Store.put('funcionarios', Object.assign({}, f, { turno: '', horario: h.trim() })); }
+      else await Store.put('funcionarios', Object.assign({}, f, { turno: t.id, horario: t.horario }));
+      toast('Turno salvo'); desenhar();
+    });
     $$('[data-hh]', m.el).forEach(i => i.onchange = async () => { const f = Func.get(i.dataset.hh); await Store.put('funcionarios', Object.assign({}, f, { horario: i.value.trim() })); toast('Horário salvo'); });
+    const au = $('#he-auto', m.el); if (au) au.onclick = async () => {
+      const lista = sem.map(f => ({ f, t: ts.find(x => x.id === sugestaoTurno(f)) }));
+      if (!(await confirmar(`Preencher assim?<br><br>${lista.map(x => `<b>${esc(x.f.nome)}</b> → ${esc(x.t.nome)} (${esc(x.t.horario)})`).join('<br>')}<br><br><span class="small">Depois dá para mudar qualquer um com um toque.</span>`, { ok: 'Preencher' }))) return;
+      for (const x of lista) await Store.put('funcionarios', Object.assign({}, x.f, { turno: x.t.id, horario: x.t.horario }));
+      toast(`${lista.length} turnos preenchidos`); desenhar();
+    };
   };
   const m = modal({ title: 'Turno de cada funcionário', wide: true, body: '', foot: '<button class="btn primary" data-x>Pronto</button>', onClose: () => App.render() });
   desenhar();
@@ -1371,6 +1392,14 @@ function horarioDo(f, dia) { return String((ehDomingo(dia) ? (f.horarioDom || St
 function horaIni(f, dia) { return hIni(horarioDo(f || {}, dia)); }
 function horaFim(f, dia) { return hFim(horarioDo(f || {}, dia)); }
 /* minutos de atraso da primeira batida do dia (null se não chegou atrasado) */
+/* batida fora do horário do dia (antes da liberação ou mais de 10 min depois da saída) */
+function foraDoHorario(f, dia, t) {
+  const a0 = horaIni(f, dia), b0 = horaFim(f, dia); if (!a0 || !b0) return false;
+  const v = Bat.virada(), dt = hm => { const [h, m] = hm.split(':').map(Number), d = D.parse(dia); d.setHours(h, m, 0, 0); if (h < v) d.setDate(d.getDate() + 1); return +d; };
+  const a = dt(a0); let b = dt(b0); if (b <= a) b += 86400000;
+  const antes = Math.max(5, +Store.cfg().pontoAntecedencia || 0) * 60000;
+  return t < a - antes || t > b + 10 * 60000;
+}
 function atrasoDe(f, dia, primeira) {
   const ini = horaIni(f, dia); if (!ini || !primeira) return null;
   const [h, m] = ini.split(':').map(Number), esp = D.parse(dia); esp.setHours(h, m, 0, 0);
